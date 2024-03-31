@@ -528,6 +528,7 @@ ssl_ctx_st::ssl_ctx_st(const SSL_METHOD *ssl_method)
       retain_only_sha256_of_client_certs(false),
       quiet_shutdown(false),
       ocsp_stapling_enabled(false),
+      // record_size_limit(0),
       signed_cert_timestamps_enabled(false),
       channel_id_enabled(false),
       grease_enabled(false),
@@ -681,6 +682,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->channel_id_enabled = ctx->channel_id_enabled;
   ssl->config->channel_id_private = UpRef(ctx->channel_id_private);
 
+  // ssl->config->record_size_limit = ctx->record_size_limit;
   ssl->config->signed_cert_timestamps_enabled =
       ctx->signed_cert_timestamps_enabled;
   ssl->config->ocsp_stapling_enabled = ctx->ocsp_stapling_enabled;
@@ -2188,6 +2190,11 @@ void SSL_set_custom_verify(
   ssl->config->custom_verify_callback = callback;
 }
 
+// curl-impersonate: external API for record size limit
+// void SSL_CTX_add_record_size_limit(SSL_CTX, *ctx, uint16_t limit) {
+//   ctx->record_size_limit = limit;
+// }
+
 void SSL_CTX_enable_signed_cert_timestamps(SSL_CTX *ctx) {
   ctx->signed_cert_timestamps_enabled = true;
 }
@@ -3013,6 +3020,12 @@ void SSL_CTX_set_grease_enabled(SSL_CTX *ctx, int enabled) {
 
 void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled) {
   ctx->permute_extensions = !!enabled;
+}
+
+// curl-impersonate: set extensions order
+int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order) {
+  ctx->extension_order = order;
+  return 0;
 }
 
 void SSL_set_permute_extensions(SSL *ssl, int enabled) {

@@ -222,6 +222,9 @@ extern "C" {
 // ExtensionType value from RFC 8879
 #define TLSEXT_TYPE_cert_compression 27
 
+// ExtensionType value from RFC 8449
+#define TLSEXT_TYPE_record_size_limit 28
+
 // ExtensionType value from RFC 4507
 #define TLSEXT_TYPE_session_ticket 35
 

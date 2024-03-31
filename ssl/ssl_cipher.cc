@@ -571,16 +571,6 @@ Span<const SSL_CIPHER> AllCiphers() {
   return MakeConstSpan(kCiphers, OPENSSL_ARRAY_SIZE(kCiphers));
 }
 
-static constexpr size_t NumTLS13Ciphers() {
-  size_t num = 0;
-  for (const auto &cipher : kCiphers) {
-    if (cipher.algorithm_mkey == SSL_kGENERIC) {
-      num++;
-    }
-  }
-  return num;
-}
-
 #define CIPHER_ADD 1
 #define CIPHER_KILL 2
 #define CIPHER_DEL 3
@@ -1285,11 +1275,16 @@ bool ssl_create_cipher_list(UniquePtr<SSLCipherPreferenceList> *out_cipher_list,
       TLS1_CK_PSK_WITH_AES_256_CBC_SHA & 0xffff,
       SSL3_CK_RSA_DES_192_CBC3_SHA & 0xffff,
   };
+  // curl-impersonate: add TLS 1.3 ciphers here for ordering
+  static const uint16_t kTLS13Ciphers[] = {
+      TLS1_3_CK_AES_128_GCM_SHA256 & 0xffff,
+      TLS1_3_CK_AES_256_GCM_SHA384 & 0xffff,
+      TLS1_3_CK_CHACHA20_POLY1305_SHA256 & 0xffff,
+  };
 
   // Set up a linked list of ciphers.
-  CIPHER_ORDER co_list[OPENSSL_ARRAY_SIZE(kAESCiphers) +
-                       OPENSSL_ARRAY_SIZE(kChaChaCiphers) +
-                       OPENSSL_ARRAY_SIZE(kLegacyCiphers)];
+  CIPHER_ORDER co_list[OPENSSL_ARRAY_SIZE(kCiphers)];
+
   for (size_t i = 0; i < OPENSSL_ARRAY_SIZE(co_list); i++) {
     co_list[i].next =
         i + 1 < OPENSSL_ARRAY_SIZE(co_list) ? &co_list[i + 1] : nullptr;
@@ -1325,8 +1320,13 @@ bool ssl_create_cipher_list(UniquePtr<SSLCipherPreferenceList> *out_cipher_list,
     co_list[num++].cipher = SSL_get_cipher_by_value(id);
     assert(co_list[num - 1].cipher != nullptr);
   }
+  // curl-impersonate: add TLS 1.3 ciphers here for ordering
+  for (uint16_t id: kTLS13Ciphers) {
+    co_list[num++].cipher = SSL_get_cipher_by_value(id);
+    assert(co_list[num - 1].cipher != nullptr);
+  }
   assert(num == OPENSSL_ARRAY_SIZE(co_list));
-  static_assert(OPENSSL_ARRAY_SIZE(co_list) + NumTLS13Ciphers() ==
+  static_assert(OPENSSL_ARRAY_SIZE(co_list) ==
                     OPENSSL_ARRAY_SIZE(kCiphers),
                 "Not all ciphers are included in the cipher order");
 

@@ -2166,6 +2166,9 @@ bssl::UniquePtr<SSL_SESSION> tls13_create_session_with_ticket(SSL *ssl,
 // for |hs|, if applicable. It returns true on success and false on error.
 bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs);
 
+// curl-impersonate
+bool ssl_set_extension_order(SSL_HANDSHAKE *hs);
+
 // ssl_setup_key_shares computes client key shares and saves them in |hs|. It
 // returns true on success and false on failure. If |override_group_id| is zero,
 // it offers the default groups, including GREASE. If it is non-zero, it offers
@@ -3038,6 +3041,9 @@ struct SSL_CONFIG {
   // crypto
   UniquePtr<SSLCipherPreferenceList> cipher_list;
 
+  // curl-impersonate
+  char *extension_order = nullptr;
+
   // This is used to hold the local certificate used (i.e. the server
   // certificate for a server or the client certificate for a client).
   UniquePtr<CERT> cert;
@@ -3107,6 +3113,9 @@ struct SSL_CONFIG {
   // ech_grease_enabled controls whether ECH GREASE may be sent in the
   // ClientHello.
   bool ech_grease_enabled : 1;
+
+  // curl-impersonate
+  // uint16_t record_size_limit : 0;
 
   // Enable signed certificate time stamps. Currently client only.
   bool signed_cert_timestamps_enabled : 1;
@@ -3495,6 +3504,9 @@ struct ssl_ctx_st {
 
   bssl::UniquePtr<bssl::SSLCipherPreferenceList> cipher_list;
 
+  // curl-impersonate
+  char *extension_order = nullptr;
+
   X509_STORE *cert_store = nullptr;
   LHASH_OF(SSL_SESSION) *sessions = nullptr;
   // Most session-ids that will be cached, default is
@@ -3731,6 +3743,9 @@ struct ssl_ctx_st {
   // ocsp_stapling_enabled is only used by client connections and indicates
   // whether OCSP stapling will be requested.
   bool ocsp_stapling_enabled : 1;
+
+  // curl-impersonate: record size limit
+  // uint16_t record_size_limit : 0;
 
   // If true, a client will request certificate timestamps.
   bool signed_cert_timestamps_enabled : 1;

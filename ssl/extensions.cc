@@ -3324,6 +3324,16 @@ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
   return true;
 }
 
+
+// curl-impersonate: set customized extension order
+bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
+  // if (!hs->config->extension_order) {
+  //   return true;
+  // }
+  // TODO the actual implementation
+  return true;
+}
+
 static const struct tls_extension *tls_extension_find(uint32_t *out_index,
                                                       uint16_t value) {
   unsigned i;
@@ -3336,6 +3346,17 @@ static const struct tls_extension *tls_extension_find(uint32_t *out_index,
 
   return NULL;
 }
+
+// static bool add_record_size_limit_extension(CBB *cbb, uint16_t ext, uint16_t limit) {
+//   CBB child;
+//   if (!CBB_add_u16(cbb, ext) ||
+//       !CBB_add_u16_length_prefixed(cbb, &child) ||
+//       !CBB_add_u16(&child, limit)) {
+//     OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
+//     return false;
+//   }
+//   return CBB_flush(cbb);
+// }
 
 static bool add_padding_extension(CBB *cbb, uint16_t ext, size_t len) {
   CBB child;
