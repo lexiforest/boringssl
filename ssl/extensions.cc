@@ -3313,6 +3313,7 @@ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
       !permutation.Init(kNumExtensions)) {
     return false;
   }
+  // By default, nothing is permuted.
   for (size_t i = 0; i < kNumExtensions; i++) {
     permutation[i] = i;
   }
@@ -3320,17 +3321,12 @@ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
     // Set element |i| to a randomly-selected element 0 <= j <= i.
     std::swap(permutation[i], permutation[seeds[i - 1] % (i + 1)]);
   }
-  hs->extension_permutation = std::move(permutation);
-  return true;
-}
-
-
-// curl-impersonate: set customized extension order
-bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
-  // if (!hs->config->extension_order) {
-  //   return true;
+  // fprintf(stderr, "the permuated order is set to:");
+  // for (size_t i = 0; i < kNumExtensions; i++) {
+  //   fprintf(stderr, "%d, ", permutation[i]);
   // }
-  // TODO the actual implementation
+  // fprintf(stderr, "\n");
+  hs->extension_permutation = std::move(permutation);
   return true;
 }
 
@@ -3347,16 +3343,49 @@ static const struct tls_extension *tls_extension_find(uint32_t *out_index,
   return NULL;
 }
 
-// static bool add_record_size_limit_extension(CBB *cbb, uint16_t ext, uint16_t limit) {
-//   CBB child;
-//   if (!CBB_add_u16(cbb, ext) ||
-//       !CBB_add_u16_length_prefixed(cbb, &child) ||
-//       !CBB_add_u16(&child, limit)) {
-//     OPENSSL_PUT_ERROR(SSL, ERR_R_INTERNAL_ERROR);
-//     return false;
-//   }
-//   return CBB_flush(cbb);
-// }
+// curl-impersonate: set customized extension order
+//
+// Generate the extension_permutation array from a customized extension order string.
+//
+// The customized extension order string is a dash-separated list of extensions.
+//
+bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
+  if (hs->config->extension_order == nullptr) {
+    return true;
+  }
+  // fprintf(stderr, "order %s\n", hs->config->extension_order);
+  Array<uint8_t> order;
+  if (!order.Init(kNumExtensions)) {
+    return false;
+  }
+  // By default, nothing is reordered.
+  for (size_t i = 0; i < kNumExtensions; i++) {
+    order[i] = 255;
+  }
+  // split the order string, and put there order in the table
+  const char *delimiter = "-";
+  char *tmp = strdup(hs->config->extension_order);
+  char *ext = strtok(tmp, delimiter);
+  size_t idx = 0;
+  while (ext != nullptr) {
+    unsigned ext_index;
+    tls_extension_find(&ext_index, atoi(ext));
+    // fprintf(stderr, "found %d -> %d, ", atoi(ext), ext_index);
+    order[idx] = ext_index;
+    ext = strtok(NULL, delimiter);
+    idx++;
+  }
+  // fprintf(stderr, "\n");
+  // fprintf(stderr, "the order is set to:");
+  // for (size_t i = 0; i < kNumExtensions; i++) {
+  //   fprintf(stderr, "%d, ", order[i]);
+  // }
+  // fprintf(stderr, "\n");
+  free(tmp);
+
+  hs->extension_permutation = std::move(order);
+  return true;
+}
 
 static bool add_padding_extension(CBB *cbb, uint16_t ext, size_t len) {
   CBB child;
@@ -3404,6 +3433,9 @@ static bool ssl_add_clienthello_tlsext_inner(SSL_HANDSHAKE *hs, CBB *out,
     size_t i = hs->extension_permutation.empty()
                    ? unpermuted
                    : hs->extension_permutation[unpermuted];
+    // fprintf(stderr, "extension %zu,", i);
+    // fprintf(stderr, "\n");
+    if (i == 255) { continue; } // curl-impersonate: skip non-exist extensions
     const size_t len_before = CBB_len(&extensions);
     const size_t len_compressed_before = CBB_len(compressed.get());
     if (!kExtensions[i].add_clienthello(hs, &extensions, compressed.get(),
@@ -3513,6 +3545,7 @@ bool ssl_add_clienthello_tlsext(SSL_HANDSHAKE *hs, CBB *out, CBB *out_encoded,
     size_t i = hs->extension_permutation.empty()
                    ? unpermuted
                    : hs->extension_permutation[unpermuted];
+    if (i == 255) { continue; } // curl-impersonate: skip non-exist extensions
     const size_t len_before = CBB_len(&extensions);
     if (!kExtensions[i].add_clienthello(hs, &extensions, &extensions, type)) {
       OPENSSL_PUT_ERROR(SSL, SSL_R_ERROR_ADDING_EXTENSION);

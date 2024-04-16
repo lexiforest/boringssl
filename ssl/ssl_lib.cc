@@ -528,7 +528,6 @@ ssl_ctx_st::ssl_ctx_st(const SSL_METHOD *ssl_method)
       retain_only_sha256_of_client_certs(false),
       quiet_shutdown(false),
       ocsp_stapling_enabled(false),
-      // record_size_limit(0),
       signed_cert_timestamps_enabled(false),
       channel_id_enabled(false),
       grease_enabled(false),
@@ -658,6 +657,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->retain_only_sha256_of_client_certs =
       ctx->retain_only_sha256_of_client_certs;
   ssl->config->permute_extensions = ctx->permute_extensions;
+  ssl->config->extension_order = ctx->extension_order;
   ssl->config->aes_hw_override = ctx->aes_hw_override;
   ssl->config->aes_hw_override_value = ctx->aes_hw_override_value;
   ssl->config->tls13_cipher_policy = ctx->tls13_cipher_policy;
@@ -682,7 +682,6 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->channel_id_enabled = ctx->channel_id_enabled;
   ssl->config->channel_id_private = UpRef(ctx->channel_id_private);
 
-  // ssl->config->record_size_limit = ctx->record_size_limit;
   ssl->config->signed_cert_timestamps_enabled =
       ctx->signed_cert_timestamps_enabled;
   ssl->config->ocsp_stapling_enabled = ctx->ocsp_stapling_enabled;
@@ -2189,11 +2188,6 @@ void SSL_set_custom_verify(
   ssl->config->verify_mode = mode;
   ssl->config->custom_verify_callback = callback;
 }
-
-// curl-impersonate: external API for record size limit
-// void SSL_CTX_add_record_size_limit(SSL_CTX, *ctx, uint16_t limit) {
-//   ctx->record_size_limit = limit;
-// }
 
 void SSL_CTX_enable_signed_cert_timestamps(SSL_CTX *ctx) {
   ctx->signed_cert_timestamps_enabled = true;

@@ -3114,9 +3114,6 @@ struct SSL_CONFIG {
   // ClientHello.
   bool ech_grease_enabled : 1;
 
-  // curl-impersonate
-  // uint16_t record_size_limit : 0;
-
   // Enable signed certificate time stamps. Currently client only.
   bool signed_cert_timestamps_enabled : 1;
 
@@ -3743,9 +3740,6 @@ struct ssl_ctx_st {
   // ocsp_stapling_enabled is only used by client connections and indicates
   // whether OCSP stapling will be requested.
   bool ocsp_stapling_enabled : 1;
-
-  // curl-impersonate: record size limit
-  // uint16_t record_size_limit : 0;
 
   // If true, a client will request certificate timestamps.
   bool signed_cert_timestamps_enabled : 1;
