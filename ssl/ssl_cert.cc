@@ -602,8 +602,7 @@ bool ssl_cert_check_key_usage(const CBS *in, enum ssl_key_usage_t bit) {
     }
 
     if (!CBS_asn1_bitstring_has_bit(&bit_string, bit)) {
-      OPENSSL_PUT_ERROR(SSL, SSL_R_KEY_USAGE_BIT_INCORRECT);
-      return false;
+      // curl-impersonate: bypass the key usage check
     }
 
     return true;
