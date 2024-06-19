@@ -1374,7 +1374,8 @@ static enum ssl_hs_wait_t do_send_client_key_exchange(SSL_HANDSHAKE *hs) {
     ssl_key_usage_t intended_use = (alg_k & SSL_kRSA)
                                        ? key_usage_encipherment
                                        : key_usage_digital_signature;
-    if (!ssl_cert_check_key_usage(&leaf_cbs, intended_use)) {
+    if (hs->config->key_usage_check_enabled &&
+        !ssl_cert_check_key_usage(&leaf_cbs, intended_use)) {
       if (hs->config->enforce_rsa_key_usage ||
           EVP_PKEY_id(hs->peer_pubkey.get()) != EVP_PKEY_RSA) {
         return ssl_hs_error;

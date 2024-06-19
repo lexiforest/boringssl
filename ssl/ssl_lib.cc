@@ -657,7 +657,8 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->retain_only_sha256_of_client_certs =
       ctx->retain_only_sha256_of_client_certs;
   ssl->config->permute_extensions = ctx->permute_extensions;
-  ssl->config->extension_order = ctx->extension_order;
+  ssl->config->extension_order = ctx->extension_order;  // curl-impersonate
+  ssl->config->key_usage_check_enabled = ctx->key_usage_check_enabled;  // curl-impersonate
   ssl->config->aes_hw_override = ctx->aes_hw_override;
   ssl->config->aes_hw_override_value = ctx->aes_hw_override_value;
   ssl->config->tls13_cipher_policy = ctx->tls13_cipher_policy;
@@ -3019,6 +3020,11 @@ void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled) {
 // curl-impersonate: set extensions order
 int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order) {
   ctx->extension_order = order;
+  return 0;
+}
+
+int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled) {
+  ctx->key_usage_check_enabled = enabled;
   return 0;
 }
 
