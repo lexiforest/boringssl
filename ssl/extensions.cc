@@ -3368,7 +3368,7 @@ bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
   char *ext = strtok(tmp, delimiter);
   size_t idx = 0;
   while (ext != nullptr) {
-    unsigned ext_index;
+    unsigned ext_index = 0;
     tls_extension_find(&ext_index, atoi(ext));
     // fprintf(stderr, "found %d -> %d, ", atoi(ext), ext_index);
     order[idx] = ext_index;
