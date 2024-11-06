@@ -1560,12 +1560,6 @@ OPENSSL_EXPORT int SSL_CTX_set_strict_cipher_list(SSL_CTX *ctx,
 // garbage inputs, unless an empty cipher list results.
 OPENSSL_EXPORT int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str);
 
-// curl-impersonate: set the extension order by given string
-OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
-
-// curl-impersonate
-OPENSSL_EXPORT int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled);
-
 // SSL_set_strict_cipher_list configures the cipher list for |ssl|, evaluating
 // |str| as a cipher string and returning error if |str| contains anything
 // meaningless. It returns one on success and zero on failure.
@@ -4589,7 +4583,7 @@ OPENSSL_EXPORT void SSL_CTX_set_grease_enabled(SSL_CTX *ctx, int enabled);
 // permute extensions. For now, this is only implemented for the ClientHello.
 OPENSSL_EXPORT void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled);
 
-// curl-impersonate
+// curl-impersonate: set the extension order by given string
 OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
 
 // curl-impersonate
