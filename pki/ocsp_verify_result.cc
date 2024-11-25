@@ -4,15 +4,16 @@
 
 #include "ocsp_verify_result.h"
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 OCSPVerifyResult::OCSPVerifyResult() = default;
-OCSPVerifyResult::OCSPVerifyResult(const OCSPVerifyResult&) = default;
+OCSPVerifyResult::OCSPVerifyResult(const OCSPVerifyResult &) = default;
 OCSPVerifyResult::~OCSPVerifyResult() = default;
 
-bool OCSPVerifyResult::operator==(const OCSPVerifyResult& other) const {
-  if (response_status != other.response_status)
+bool OCSPVerifyResult::operator==(const OCSPVerifyResult &other) const {
+  if (response_status != other.response_status) {
     return false;
+  }
 
   if (response_status == PROVIDED) {
     // |revocation_status| is only defined when |response_status| is PROVIDED.
@@ -21,4 +22,4 @@ bool OCSPVerifyResult::operator==(const OCSPVerifyResult& other) const {
   return true;
 }
 
-}  // namespace net
+BSSL_NAMESPACE_END

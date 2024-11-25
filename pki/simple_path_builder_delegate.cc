@@ -4,11 +4,6 @@
 
 #include "simple_path_builder_delegate.h"
 
-#include "cert_error_params.h"
-#include "cert_errors.h"
-#include "signature_algorithm.h"
-#include "signature_verify_cache.h"
-#include "verify_signed_data.h"
 #include <openssl/bn.h>
 #include <openssl/bytestring.h>
 #include <openssl/digest.h>
@@ -16,9 +11,15 @@
 #include <openssl/ec_key.h>
 #include <openssl/evp.h>
 #include <openssl/nid.h>
+#include <openssl/pki/signature_verify_cache.h>
 #include <openssl/rsa.h>
 
-namespace bssl {
+#include "cert_error_params.h"
+#include "cert_errors.h"
+#include "signature_algorithm.h"
+#include "verify_signed_data.h"
+
+BSSL_NAMESPACE_BEGIN
 
 DEFINE_CERT_ERROR_ID(SimplePathBuilderDelegate::kRsaModulusTooSmall,
                      "RSA modulus too small");
@@ -42,28 +43,29 @@ bool IsAcceptableCurveForEcdsa(int curve_nid) {
 }  // namespace
 
 SimplePathBuilderDelegate::SimplePathBuilderDelegate(
-    size_t min_rsa_modulus_length_bits,
-    DigestPolicy digest_policy)
+    size_t min_rsa_modulus_length_bits, DigestPolicy digest_policy)
     : min_rsa_modulus_length_bits_(min_rsa_modulus_length_bits),
       digest_policy_(digest_policy) {}
 
 void SimplePathBuilderDelegate::CheckPathAfterVerification(
-    const CertPathBuilder& path_builder,
-    CertPathBuilderResultPath* path) {
+    const CertPathBuilder &path_builder, CertPathBuilderResultPath *path) {
   // Do nothing - consider all candidate paths valid.
 }
 
-bool SimplePathBuilderDelegate::IsDeadlineExpired() {
-  return false;
-}
+bool SimplePathBuilderDelegate::IsDeadlineExpired() { return false; }
 
-SignatureVerifyCache* SimplePathBuilderDelegate::GetVerifyCache() {
+bool SimplePathBuilderDelegate::IsDebugLogEnabled() { return false; }
+
+bool SimplePathBuilderDelegate::AcceptPreCertificates() { return false; }
+
+void SimplePathBuilderDelegate::DebugLog(std::string_view msg) {}
+
+SignatureVerifyCache *SimplePathBuilderDelegate::GetVerifyCache() {
   return nullptr;
 }
 
 bool SimplePathBuilderDelegate::IsSignatureAlgorithmAcceptable(
-    SignatureAlgorithm algorithm,
-    CertErrors* errors) {
+    SignatureAlgorithm algorithm, CertErrors *errors) {
   switch (algorithm) {
     case SignatureAlgorithm::kRsaPkcs1Sha1:
     case SignatureAlgorithm::kEcdsaSha1:
@@ -83,18 +85,19 @@ bool SimplePathBuilderDelegate::IsSignatureAlgorithmAcceptable(
   return false;
 }
 
-bool SimplePathBuilderDelegate::IsPublicKeyAcceptable(EVP_PKEY* public_key,
-                                                      CertErrors* errors) {
+bool SimplePathBuilderDelegate::IsPublicKeyAcceptable(EVP_PKEY *public_key,
+                                                      CertErrors *errors) {
   int pkey_id = EVP_PKEY_id(public_key);
   if (pkey_id == EVP_PKEY_RSA) {
     // Extract the modulus length from the key.
-    RSA* rsa = EVP_PKEY_get0_RSA(public_key);
-    if (!rsa)
+    RSA *rsa = EVP_PKEY_get0_RSA(public_key);
+    if (!rsa) {
       return false;
+    }
     unsigned int modulus_length_bits = RSA_bits(rsa);
 
     if (modulus_length_bits < min_rsa_modulus_length_bits_) {
-      errors->AddError(
+      errors->AddWarning(
           kRsaModulusTooSmall,
           CreateCertErrorParams2SizeT("actual", modulus_length_bits, "minimum",
                                       min_rsa_modulus_length_bits_));
@@ -106,13 +109,14 @@ bool SimplePathBuilderDelegate::IsPublicKeyAcceptable(EVP_PKEY* public_key,
 
   if (pkey_id == EVP_PKEY_EC) {
     // Extract the curve name.
-    EC_KEY* ec = EVP_PKEY_get0_EC_KEY(public_key);
-    if (!ec)
+    EC_KEY *ec = EVP_PKEY_get0_EC_KEY(public_key);
+    if (!ec) {
       return false;  // Unexpected.
+    }
     int curve_nid = EC_GROUP_get_curve_name(EC_KEY_get0_group(ec));
 
     if (!IsAcceptableCurveForEcdsa(curve_nid)) {
-      errors->AddError(kUnacceptableCurveForEcdsa);
+      errors->AddWarning(kUnacceptableCurveForEcdsa);
       return false;
     }
 
@@ -123,4 +127,4 @@ bool SimplePathBuilderDelegate::IsPublicKeyAcceptable(EVP_PKEY* public_key,
   return false;
 }
 
-}  // namespace net
+BSSL_NAMESPACE_END

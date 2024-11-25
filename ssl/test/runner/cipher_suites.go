@@ -16,6 +16,7 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"hash"
+	"slices"
 
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -28,8 +29,8 @@ type keyAgreement interface {
 	// In the case that the key agreement protocol doesn't use a
 	// ServerKeyExchange message, generateServerKeyExchange can return nil,
 	// nil.
-	generateServerKeyExchange(*Config, *Certificate, *clientHelloMsg, *serverHelloMsg, uint16) (*serverKeyExchangeMsg, error)
-	processClientKeyExchange(*Config, *Certificate, *clientKeyExchangeMsg, uint16) ([]byte, error)
+	generateServerKeyExchange(*Config, *Credential, *clientHelloMsg, *serverHelloMsg, uint16) (*serverKeyExchangeMsg, error)
+	processClientKeyExchange(*Config, *Credential, *clientKeyExchangeMsg, uint16) ([]byte, error)
 
 	// On the client side, the next two methods are called in order.
 
@@ -338,11 +339,9 @@ func ecdhePSKKA(version uint16) keyAgreement {
 
 // mutualCipherSuite returns a cipherSuite given a list of supported
 // ciphersuites and the id requested by the peer.
-func mutualCipherSuite(have []uint16, want uint16) *cipherSuite {
-	for _, id := range have {
-		if id == want {
-			return cipherSuiteFromID(id)
-		}
+func mutualCipherSuite(have []uint16, id uint16) *cipherSuite {
+	if slices.Contains(have, id) {
+		return cipherSuiteFromID(id)
 	}
 	return nil
 }

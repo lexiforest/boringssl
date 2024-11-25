@@ -10,13 +10,13 @@
 
 #include <sstream>
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 namespace {
 
-void AppendLinesWithIndentation(const std::string& text,
-                                const std::string& indentation,
-                                std::string* out) {
+void AppendLinesWithIndentation(const std::string &text,
+                                const std::string &indentation,
+                                std::string *out) {
   std::istringstream stream(text);
   for (std::string line; std::getline(stream, line, '\n');) {
     out->append(indentation);
@@ -29,14 +29,13 @@ void AppendLinesWithIndentation(const std::string& text,
 
 CertError::CertError() = default;
 
-CertError::CertError(Severity in_severity,
-                     CertErrorId in_id,
+CertError::CertError(Severity in_severity, CertErrorId in_id,
                      std::unique_ptr<CertErrorParams> in_params)
     : severity(in_severity), id(in_id), params(std::move(in_params)) {}
 
-CertError::CertError(CertError&& other) = default;
+CertError::CertError(CertError &&other) = default;
 
-CertError& CertError::operator=(CertError&&) = default;
+CertError &CertError::operator=(CertError &&) = default;
 
 CertError::~CertError() = default;
 
@@ -53,19 +52,19 @@ std::string CertError::ToDebugString() const {
   result += CertErrorIdToDebugString(id);
   result += +"\n";
 
-  if (params)
+  if (params) {
     AppendLinesWithIndentation(params->ToDebugString(), "  ", &result);
+  }
 
   return result;
 }
 
 CertErrors::CertErrors() = default;
-CertErrors::CertErrors(CertErrors&& other) = default;
-CertErrors& CertErrors::operator=(CertErrors&&) = default;
+CertErrors::CertErrors(CertErrors &&other) = default;
+CertErrors &CertErrors::operator=(CertErrors &&) = default;
 CertErrors::~CertErrors() = default;
 
-void CertErrors::Add(CertError::Severity severity,
-                     CertErrorId id,
+void CertErrors::Add(CertError::Severity severity, CertErrorId id,
                      std::unique_ptr<CertErrorParams> params) {
   nodes_.emplace_back(severity, id, std::move(params));
 }
@@ -75,103 +74,138 @@ void CertErrors::AddError(CertErrorId id,
   Add(CertError::SEVERITY_HIGH, id, std::move(params));
 }
 
-void CertErrors::AddError(CertErrorId id) {
-  AddError(id, nullptr);
-}
+void CertErrors::AddError(CertErrorId id) { AddError(id, nullptr); }
 
 void CertErrors::AddWarning(CertErrorId id,
                             std::unique_ptr<CertErrorParams> params) {
   Add(CertError::SEVERITY_WARNING, id, std::move(params));
 }
 
-void CertErrors::AddWarning(CertErrorId id) {
-  AddWarning(id, nullptr);
-}
+void CertErrors::AddWarning(CertErrorId id) { AddWarning(id, nullptr); }
 
 std::string CertErrors::ToDebugString() const {
   std::string result;
-  for (const CertError& node : nodes_)
+  for (const CertError &node : nodes_) {
     result += node.ToDebugString();
+  }
 
   return result;
 }
 
-bool CertErrors::ContainsError(CertErrorId id) const {
-  for (const CertError& node : nodes_) {
-    if (node.id == id)
+bool CertErrors::ContainsErrorWithSeverity(CertErrorId id,
+                                           CertError::Severity severity) const {
+  for (const CertError &node : nodes_) {
+    if (node.id == id && node.severity == severity) {
       return true;
+    }
   }
   return false;
 }
 
+bool CertErrors::ContainsError(CertErrorId id) const {
+  return ContainsErrorWithSeverity(id, CertError::SEVERITY_HIGH);
+}
+
 bool CertErrors::ContainsAnyErrorWithSeverity(
     CertError::Severity severity) const {
-  for (const CertError& node : nodes_) {
-    if (node.severity == severity)
+  for (const CertError &node : nodes_) {
+    if (node.severity == severity) {
       return true;
+    }
   }
   return false;
 }
 
 CertPathErrors::CertPathErrors() = default;
 
-CertPathErrors::CertPathErrors(CertPathErrors&& other) = default;
-CertPathErrors& CertPathErrors::operator=(CertPathErrors&&) = default;
+CertPathErrors::CertPathErrors(CertPathErrors &&other) = default;
+CertPathErrors &CertPathErrors::operator=(CertPathErrors &&) = default;
 
 CertPathErrors::~CertPathErrors() = default;
 
-CertErrors* CertPathErrors::GetErrorsForCert(size_t cert_index) {
-  if (cert_index >= cert_errors_.size())
+CertErrors *CertPathErrors::GetErrorsForCert(size_t cert_index) {
+  if (cert_index >= cert_errors_.size()) {
     cert_errors_.resize(cert_index + 1);
+  }
   return &cert_errors_[cert_index];
 }
 
-const CertErrors* CertPathErrors::GetErrorsForCert(size_t cert_index) const {
-  if (cert_index >= cert_errors_.size())
+const CertErrors *CertPathErrors::GetErrorsForCert(size_t cert_index) const {
+  if (cert_index >= cert_errors_.size()) {
     return nullptr;
+  }
   return &cert_errors_[cert_index];
 }
 
-CertErrors* CertPathErrors::GetOtherErrors() {
+CertErrors *CertPathErrors::GetOtherErrors() { return &other_errors_; }
+
+const CertErrors *CertPathErrors::GetOtherErrors() const {
   return &other_errors_;
 }
 
 bool CertPathErrors::ContainsError(CertErrorId id) const {
-  for (const CertErrors& errors : cert_errors_) {
-    if (errors.ContainsError(id))
+  for (const CertErrors &errors : cert_errors_) {
+    if (errors.ContainsError(id)) {
       return true;
+    }
   }
 
-  if (other_errors_.ContainsError(id))
+  if (other_errors_.ContainsError(id)) {
     return true;
+  }
 
   return false;
 }
 
 bool CertPathErrors::ContainsAnyErrorWithSeverity(
     CertError::Severity severity) const {
-  for (const CertErrors& errors : cert_errors_) {
-    if (errors.ContainsAnyErrorWithSeverity(severity))
+  for (const CertErrors &errors : cert_errors_) {
+    if (errors.ContainsAnyErrorWithSeverity(severity)) {
       return true;
+    }
   }
 
-  if (other_errors_.ContainsAnyErrorWithSeverity(severity))
+  if (other_errors_.ContainsAnyErrorWithSeverity(severity)) {
     return true;
+  }
 
   return false;
 }
 
+std::optional<CertErrorId> CertPathErrors::FindSingleHighSeverityError(
+    ptrdiff_t &out_depth) const {
+  std::optional<CertErrorId> id_seen;
+  for (ptrdiff_t i = -1; i < (ptrdiff_t)cert_errors_.size(); ++i) {
+    const CertErrors *errors =
+        (i < 0) ? GetOtherErrors() : GetErrorsForCert(i);
+    for (const CertError &node : errors->nodes_) {
+      if (node.severity == CertError::SEVERITY_HIGH) {
+        if (!id_seen.has_value()) {
+          id_seen = node.id;
+          out_depth = i;
+        } else {
+          if (id_seen.value() != node.id) {
+            return {};
+          }
+        }
+      }
+    }
+  }
+  return id_seen;
+}
+
 std::string CertPathErrors::ToDebugString(
-    const ParsedCertificateList& certs) const {
+    const ParsedCertificateList &certs) const {
   std::ostringstream result;
 
   for (size_t i = 0; i < cert_errors_.size(); ++i) {
     // Pretty print the current CertErrors. If there were no errors/warnings,
     // then continue.
-    const CertErrors& errors = cert_errors_[i];
+    const CertErrors &errors = cert_errors_[i];
     std::string cert_errors_string = errors.ToDebugString();
-    if (cert_errors_string.empty())
+    if (cert_errors_string.empty()) {
       continue;
+    }
 
     // Add a header that identifies which certificate this CertErrors pertains
     // to.
@@ -198,4 +232,4 @@ std::string CertPathErrors::ToDebugString(
   return result.str();
 }
 
-}  // namespace net
+BSSL_NAMESPACE_END

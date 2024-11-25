@@ -5,13 +5,14 @@
 #ifndef BSSL_PKI_TRUST_STORE_H_
 #define BSSL_PKI_TRUST_STORE_H_
 
-#include "fillins/openssl_util.h"
+#include <optional>
+
+#include <openssl/base.h>
 
 #include "cert_issuer_source.h"
 #include "parsed_certificate.h"
-#include <optional>
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 enum class CertificateTrustType {
   // This certificate is explicitly blocked (distrusted).
@@ -100,7 +101,7 @@ struct OPENSSL_EXPORT CertificateTrust {
   std::string ToDebugString() const;
 
   static std::optional<CertificateTrust> FromDebugString(
-      const std::string& trust_string);
+      const std::string &trust_string);
 
   // The overall type of trust.
   CertificateTrustType type = CertificateTrustType::UNSPECIFIED;
@@ -127,17 +128,17 @@ class OPENSSL_EXPORT TrustStore : public CertIssuerSource {
  public:
   TrustStore();
 
-  TrustStore(const TrustStore&) = delete;
-  TrustStore& operator=(const TrustStore&) = delete;
+  TrustStore(const TrustStore &) = delete;
+  TrustStore &operator=(const TrustStore &) = delete;
 
   // Returns the trusted of |cert|, which must be non-null.
-  virtual CertificateTrust GetTrust(const ParsedCertificate* cert) = 0;
+  virtual CertificateTrust GetTrust(const ParsedCertificate *cert) = 0;
 
   // Disable async issuers for TrustStore, as it isn't needed.
-  void AsyncGetIssuersOf(const ParsedCertificate* cert,
-                         std::unique_ptr<Request>* out_req) final;
+  void AsyncGetIssuersOf(const ParsedCertificate *cert,
+                         std::unique_ptr<Request> *out_req) final;
 };
 
-}  // namespace net
+BSSL_NAMESPACE_END
 
 #endif  // BSSL_PKI_TRUST_STORE_H_

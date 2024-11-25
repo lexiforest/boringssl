@@ -12,14 +12,14 @@
 #include "trust_store.h"
 #include "verify_certificate_chain_typed_unittest.h"
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 namespace {
 
 class VerifyCertificateChainTestDelegate {
  public:
-  static void Verify(const VerifyCertChainTest& test,
-                     const std::string& test_file_path) {
+  static void Verify(const VerifyCertChainTest &test,
+                     const std::string &test_file_path) {
     SimplePathBuilderDelegate delegate(1024, test.digest_policy);
 
     CertPathErrors errors;
@@ -125,4 +125,4 @@ TEST(VerifyCertificateIsSelfSigned, SelfSigned) {
   EXPECT_EQ(cache.CacheStores(), 1U);
 }
 
-}  // namespace net
+BSSL_NAMESPACE_END

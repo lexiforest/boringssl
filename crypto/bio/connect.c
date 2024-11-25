@@ -296,13 +296,10 @@ end:
 }
 
 static BIO_CONNECT *BIO_CONNECT_new(void) {
-  BIO_CONNECT *ret = OPENSSL_malloc(sizeof(BIO_CONNECT));
-
+  BIO_CONNECT *ret = OPENSSL_zalloc(sizeof(BIO_CONNECT));
   if (ret == NULL) {
     return NULL;
   }
-  OPENSSL_memset(ret, 0, sizeof(BIO_CONNECT));
-
   ret->state = BIO_CONN_S_BEFORE;
   return ret;
 }
@@ -490,7 +487,11 @@ static long conn_callback_ctrl(BIO *bio, int cmd, bio_info_cb fp) {
       // convention.
       OPENSSL_MSVC_PRAGMA(warning(push))
       OPENSSL_MSVC_PRAGMA(warning(disable : 4191))
+      OPENSSL_CLANG_PRAGMA("clang diagnostic push")
+      OPENSSL_CLANG_PRAGMA("clang diagnostic ignored \"-Wunknown-warning-option\"")
+      OPENSSL_CLANG_PRAGMA("clang diagnostic ignored \"-Wcast-function-type\"")
       data->info_callback = (int (*)(const struct bio_st *, int, int))fp;
+      OPENSSL_CLANG_PRAGMA("clang diagnostic pop")
       OPENSSL_MSVC_PRAGMA(warning(pop))
       break;
     default:

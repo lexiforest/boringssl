@@ -6,16 +6,17 @@
 
 #include <string_view>
 
-#include "parse_values.h"
 #include <gtest/gtest.h>
+#include "parse_values.h"
 
-namespace bssl::der::test {
+BSSL_NAMESPACE_BEGIN
+namespace der::test {
 
 namespace {
 
 template <size_t N>
 std::string_view ToStringView(const uint8_t (&data)[N]) {
-  return std::string_view(reinterpret_cast<const char*>(data), N);
+  return std::string_view(reinterpret_cast<const char *>(data), N);
 }
 
 }  // namespace
@@ -166,4 +167,5 @@ TEST(EncodeValuesTest, EncodeUTCTime) {
   EXPECT_FALSE(EncodeUTCTime(time, out));
 }
 
-}  // namespace bssl::der::test
+}  // namespace der::test
+BSSL_NAMESPACE_END

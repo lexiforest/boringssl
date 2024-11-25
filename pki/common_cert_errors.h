@@ -5,7 +5,7 @@
 #ifndef BSSL_PKI_COMMON_CERT_ERRORS_H_
 #define BSSL_PKI_COMMON_CERT_ERRORS_H_
 
-#include "fillins/openssl_util.h"
+#include <openssl/base.h>
 
 #include "cert_errors.h"
 
@@ -13,7 +13,8 @@
 // defined by the core verification/path building code).
 //
 // Errors may be defined for other domains.
-namespace bssl::cert_errors {
+BSSL_NAMESPACE_BEGIN
+namespace cert_errors {
 
 // An internal error occurred which prevented path building or verification
 // from finishing.
@@ -108,10 +109,6 @@ OPENSSL_EXPORT extern const CertErrorId kUnacceptableSignatureAlgorithm;
 // What constitutes as "acceptable" is determined by the verification delegate.
 OPENSSL_EXPORT extern const CertErrorId kUnacceptablePublicKey;
 
-// The certificate's EKU is missing serverAuth. However Netscape Server Gated
-// Crypto is present instead.
-OPENSSL_EXPORT extern const CertErrorId kEkuLacksServerAuthButHasGatedCrypto;
-
 // The certificate's EKU is missing serverAuth. However EKU ANY is present
 // instead.
 OPENSSL_EXPORT extern const CertErrorId kEkuLacksServerAuthButHasAnyEKU;
@@ -159,6 +156,7 @@ OPENSSL_EXPORT extern const CertErrorId kIterationLimitExceeded;
 // Depth limit was reached during path building.
 OPENSSL_EXPORT extern const CertErrorId kDepthLimitExceeded;
 
-}  // namespace bssl::cert_errors
+}  // namespace cert_errors
+BSSL_NAMESPACE_END
 
 #endif  // BSSL_PKI_COMMON_CERT_ERRORS_H_

@@ -5,10 +5,9 @@
 #ifndef BSSL_PKI_CERT_ERROR_ID_H_
 #define BSSL_PKI_CERT_ERROR_ID_H_
 
-#include "fillins/openssl_util.h"
+#include <openssl/base.h>
 
-
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 // Each "class" of certificate error/warning has its own unique ID. This is
 // essentially like an error code, however the value is not stable. Under the
@@ -18,7 +17,7 @@ namespace bssl {
 // Equality of CertErrorId can be done using the == operator.
 //
 // To define new error IDs use the macro DEFINE_CERT_ERROR_ID().
-using CertErrorId = const void*;
+using CertErrorId = const void *;
 
 // DEFINE_CERT_ERROR_ID() creates a CertErrorId given a non-null C-string
 // literal. The string should be a textual name for the error which will appear
@@ -31,8 +30,8 @@ using CertErrorId = const void*;
 
 // Returns a debug string for a CertErrorId. In practice this returns the
 // string literal given to DEFINE_CERT_ERROR_ID(), which is human-readable.
-OPENSSL_EXPORT const char* CertErrorIdToDebugString(CertErrorId id);
+OPENSSL_EXPORT const char *CertErrorIdToDebugString(CertErrorId id);
 
-}  // namespace net
+BSSL_NAMESPACE_END
 
 #endif  // BSSL_PKI_CERT_ERROR_ID_H_

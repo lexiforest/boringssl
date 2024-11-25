@@ -4,7 +4,8 @@
 
 #include "common_cert_errors.h"
 
-namespace bssl::cert_errors {
+BSSL_NAMESPACE_BEGIN
+namespace cert_errors {
 
 DEFINE_CERT_ERROR_ID(kInternalError, "Internal error");
 DEFINE_CERT_ERROR_ID(kValidityFailedNotAfter, "Time is after notAfter");
@@ -39,9 +40,6 @@ DEFINE_CERT_ERROR_ID(kSignatureAlgorithmsDifferentEncoding,
                      "than TBSCertificate.signature");
 DEFINE_CERT_ERROR_ID(kEkuLacksServerAuth,
                      "The extended key usage does not include server auth");
-DEFINE_CERT_ERROR_ID(kEkuLacksServerAuthButHasGatedCrypto,
-                     "The extended key usage does not include server auth but "
-                     "instead includes Netscape Server Gated Crypto");
 DEFINE_CERT_ERROR_ID(kEkuLacksServerAuthButHasAnyEKU,
                      "The extended key usage does not include server auth but "
                      "instead includes anyExtendeKeyUsage");
@@ -82,4 +80,5 @@ DEFINE_CERT_ERROR_ID(kDeadlineExceeded, "Deadline exceeded");
 DEFINE_CERT_ERROR_ID(kIterationLimitExceeded, "Iteration limit exceeded");
 DEFINE_CERT_ERROR_ID(kDepthLimitExceeded, "Depth limit exceeded");
 
-}  // namespace bssl::cert_errors
+}  // namespace cert_errors
+BSSL_NAMESPACE_END

@@ -181,7 +181,9 @@ TEST(ECDSATest, BuiltinCurves) {
   // Fill digest values with some random data.
   uint8_t digest[20], wrong_digest[20];
   ASSERT_TRUE(RAND_bytes(digest, 20));
+  CONSTTIME_DECLASSIFY(digest, 20);
   ASSERT_TRUE(RAND_bytes(wrong_digest, 20));
+  CONSTTIME_DECLASSIFY(wrong_digest, 20);
 
   static const struct {
     int nid;
@@ -283,6 +285,14 @@ TEST(ECDSATest, BuiltinCurves) {
 
     // Verify a tampered signature.
     TestTamperedSig(kRawAPI, digest, 20, ecdsa_sig.get(), eckey.get(), order);
+
+    // Negative components should not be accepted.
+    BN_set_negative(ecdsa_sig->r, 1);
+    EXPECT_FALSE(ECDSA_do_verify(digest, 20, ecdsa_sig.get(), eckey.get()));
+    BN_set_negative(ecdsa_sig->r, 0);
+    BN_set_negative(ecdsa_sig->s, 1);
+    EXPECT_FALSE(ECDSA_do_verify(digest, 20, ecdsa_sig.get(), eckey.get()));
+    BN_set_negative(ecdsa_sig->s, 0);
   }
 }
 

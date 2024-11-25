@@ -80,28 +80,24 @@ typedef struct {
 
 
 static int pkey_ec_init(EVP_PKEY_CTX *ctx) {
-  EC_PKEY_CTX *dctx;
-  dctx = OPENSSL_malloc(sizeof(EC_PKEY_CTX));
+  EC_PKEY_CTX *dctx = OPENSSL_zalloc(sizeof(EC_PKEY_CTX));
   if (!dctx) {
     return 0;
   }
-  OPENSSL_memset(dctx, 0, sizeof(EC_PKEY_CTX));
 
   ctx->data = dctx;
-
   return 1;
 }
 
 static int pkey_ec_copy(EVP_PKEY_CTX *dst, EVP_PKEY_CTX *src) {
-  EC_PKEY_CTX *dctx, *sctx;
   if (!pkey_ec_init(dst)) {
     return 0;
   }
-  sctx = src->data;
-  dctx = dst->data;
 
+  const EC_PKEY_CTX *sctx = src->data;
+  EC_PKEY_CTX *dctx = dst->data;
   dctx->md = sctx->md;
-
+  dctx->gen_group = sctx->gen_group;
   return 1;
 }
 

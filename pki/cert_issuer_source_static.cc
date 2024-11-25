@@ -4,7 +4,7 @@
 
 #include "cert_issuer_source_static.h"
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 CertIssuerSourceStatic::CertIssuerSourceStatic() = default;
 CertIssuerSourceStatic::~CertIssuerSourceStatic() = default;
@@ -12,26 +12,34 @@ CertIssuerSourceStatic::~CertIssuerSourceStatic() = default;
 void CertIssuerSourceStatic::AddCert(
     std::shared_ptr<const ParsedCertificate> cert) {
   intermediates_.insert(std::make_pair(
-      cert->normalized_subject().AsStringView(), std::move(cert)));
+      BytesAsStringView(cert->normalized_subject()), std::move(cert)));
 }
 
-void CertIssuerSourceStatic::Clear() {
-  intermediates_.clear();
+void CertIssuerSourceStatic::Clear() { intermediates_.clear(); }
+
+std::vector<std::shared_ptr<const ParsedCertificate>>
+CertIssuerSourceStatic::Certs() const {
+  std::vector<std::shared_ptr<const ParsedCertificate>> result;
+  result.reserve(intermediates_.size());
+  for (const auto& [key, cert] : intermediates_) {
+    result.push_back(cert);
+  }
+  return result;
 }
 
-void CertIssuerSourceStatic::SyncGetIssuersOf(const ParsedCertificate* cert,
-                                              ParsedCertificateList* issuers) {
+void CertIssuerSourceStatic::SyncGetIssuersOf(const ParsedCertificate *cert,
+                                              ParsedCertificateList *issuers) {
   auto range =
-      intermediates_.equal_range(cert->normalized_issuer().AsStringView());
-  for (auto it = range.first; it != range.second; ++it)
+      intermediates_.equal_range(BytesAsStringView(cert->normalized_issuer()));
+  for (auto it = range.first; it != range.second; ++it) {
     issuers->push_back(it->second);
+  }
 }
 
 void CertIssuerSourceStatic::AsyncGetIssuersOf(
-    const ParsedCertificate* cert,
-    std::unique_ptr<Request>* out_req) {
+    const ParsedCertificate *cert, std::unique_ptr<Request> *out_req) {
   // CertIssuerSourceStatic never returns asynchronous results.
   out_req->reset();
 }
 
-}  // namespace net
+BSSL_NAMESPACE_END

@@ -8,15 +8,16 @@
 
 #include <gtest/gtest.h>
 
-namespace bssl::der::test {
+BSSL_NAMESPACE_BEGIN
+namespace der::test {
 
 namespace {
 
 template <size_t N>
-Input FromStringLiteral(const char(&data)[N]) {
+Input FromStringLiteral(const char (&data)[N]) {
   // Strings are null-terminated. The null terminating byte shouldn't be
   // included in the Input, so the size is N - 1 instead of N.
-  return Input(reinterpret_cast<const uint8_t*>(data), N - 1);
+  return Input(reinterpret_cast<const uint8_t *>(data), N - 1);
 }
 
 }  // namespace
@@ -127,9 +128,8 @@ TEST(ParseValuesTest, ParseTimes) {
       ParseGeneralizedTime(FromStringLiteral("20001231010203Z\0"), &out));
 
   // Check what happens when a null byte is in the middle of the input.
-  EXPECT_FALSE(ParseGeneralizedTime(FromStringLiteral(
-                                        "200\0"
-                                        "1231010203Z"),
+  EXPECT_FALSE(ParseGeneralizedTime(FromStringLiteral("200\0"
+                                                      "1231010203Z"),
                                     &out));
 
   // The year can't be in hex.
@@ -214,7 +214,7 @@ const Uint64TestData kUint64TestData[] = {
 
 TEST(ParseValuesTest, ParseUint64) {
   for (size_t i = 0; i < std::size(kUint64TestData); i++) {
-    const Uint64TestData& test_case = kUint64TestData[i];
+    const Uint64TestData &test_case = kUint64TestData[i];
     SCOPED_TRACE(i);
 
     uint64_t result;
@@ -251,7 +251,7 @@ const Uint8TestData kUint8TestData[] = {
 
 TEST(ParseValuesTest, ParseUint8) {
   for (size_t i = 0; i < std::size(kUint8TestData); i++) {
-    const Uint8TestData& test_case = kUint8TestData[i];
+    const Uint8TestData &test_case = kUint8TestData[i];
     SCOPED_TRACE(i);
 
     uint8_t result;
@@ -297,7 +297,7 @@ const IsValidIntegerTestData kIsValidIntegerTestData[] = {
 
 TEST(ParseValuesTest, IsValidInteger) {
   for (size_t i = 0; i < std::size(kIsValidIntegerTestData); i++) {
-    const auto& test_case = kIsValidIntegerTestData[i];
+    const auto &test_case = kIsValidIntegerTestData[i];
     SCOPED_TRACE(i);
 
     bool negative;
@@ -318,7 +318,7 @@ TEST(ParseValuesTest, ParseBitStringEmptyNoUnusedBits) {
   ASSERT_TRUE(bit_string.has_value());
 
   EXPECT_EQ(0u, bit_string->unused_bits());
-  EXPECT_EQ(0u, bit_string->bytes().Length());
+  EXPECT_EQ(0u, bit_string->bytes().size());
 
   EXPECT_FALSE(bit_string->AssertsBit(0));
   EXPECT_FALSE(bit_string->AssertsBit(1));
@@ -350,7 +350,7 @@ TEST(ParseValuesTest, ParseBitStringSevenOneBits) {
   ASSERT_TRUE(bit_string.has_value());
 
   EXPECT_EQ(1u, bit_string->unused_bits());
-  EXPECT_EQ(1u, bit_string->bytes().Length());
+  EXPECT_EQ(1u, bit_string->bytes().size());
   EXPECT_EQ(0xFE, bit_string->bytes()[0]);
 
   EXPECT_TRUE(bit_string->AssertsBit(0));
@@ -462,4 +462,5 @@ TEST(ParseValuesTest, ParseUniversalString) {
       ParseUniversalString(der::Input(invalid_non_4_multiple_der), &s));
 }
 
-}  // namespace bssl::der::test
+}  // namespace der::test
+BSSL_NAMESPACE_END

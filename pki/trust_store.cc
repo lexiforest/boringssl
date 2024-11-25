@@ -8,7 +8,7 @@
 
 #include "string_util.h"
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 namespace {
 
@@ -126,7 +126,7 @@ std::string CertificateTrust::ToDebugString() const {
 
 // static
 std::optional<CertificateTrust> CertificateTrust::FromDebugString(
-    const std::string& trust_string) {
+    const std::string &trust_string) {
   std::vector<std::string_view> split =
       string_util::SplitString(trust_string, '+');
 
@@ -169,9 +169,9 @@ std::optional<CertificateTrust> CertificateTrust::FromDebugString(
 
 TrustStore::TrustStore() = default;
 
-void TrustStore::AsyncGetIssuersOf(const ParsedCertificate* cert,
-                                   std::unique_ptr<Request>* out_req) {
+void TrustStore::AsyncGetIssuersOf(const ParsedCertificate *cert,
+                                   std::unique_ptr<Request> *out_req) {
   out_req->reset();
 }
 
-}  // namespace net
+BSSL_NAMESPACE_END

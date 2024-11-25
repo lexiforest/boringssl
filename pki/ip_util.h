@@ -5,11 +5,11 @@
 #ifndef BSSL_PKI_IP_UTIL_H_
 #define BSSL_PKI_IP_UTIL_H_
 
-#include "fillins/openssl_util.h"
+#include <openssl/base.h>
 
 #include "input.h"
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 inline constexpr size_t kIPv4AddressSize = 4;
 inline constexpr size_t kIPv6AddressSize = 16;
@@ -21,9 +21,9 @@ OPENSSL_EXPORT bool IsValidNetmask(der::Input mask);
 
 // Returns whether `addr1` and `addr2` are equal under the netmask `mask`.
 OPENSSL_EXPORT bool IPAddressMatchesWithNetmask(der::Input addr1,
-                                                    der::Input addr2,
-                                                    der::Input mask);
+                                                der::Input addr2,
+                                                der::Input mask);
 
-}  // namespace net
+BSSL_NAMESPACE_END
 
 #endif  // BSSL_PKI_IP_UTIL_H_
