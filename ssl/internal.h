@@ -3457,6 +3457,10 @@ struct SSL_CONFIG {
   // accepted from the peer in decreasing order of preference.
   Array<uint16_t> verify_sigalgs;
 
+  // delegated_credentials, if not empty, is the set of signature algorithms
+  // supported by the client.
+  Array<uint16_t> delegated_credentials;
+
   // srtp_profiles is the list of configured SRTP protection profiles for
   // DTLS-SRTP.
   UniquePtr<STACK_OF(SRTP_PROTECTION_PROFILE)> srtp_profiles;
@@ -3521,6 +3525,9 @@ struct SSL_CONFIG {
   // aes_hw_override if set indicates we should override checking for aes
   // hardware support, and use the value in aes_hw_override_value instead.
   bool aes_hw_override : 1;
+
+  // curl-impersonate: record_size_limit is whether to send record size limit extension.
+  uint16_t record_size_limit = 0;
 
   // aes_hw_override_value is used for testing to indicate the support or lack
   // of support for AES hw. The value is only considered if |aes_hw_override| is
@@ -4103,6 +4110,10 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
   // accepted from the peer in decreasing order of preference.
   bssl::Array<uint16_t> verify_sigalgs;
 
+  // delegated_credentials, if not empty, is the set of signature algorithms
+  // supported by the client.
+  bssl::Array<uint16_t> delegated_credentials;
+
   // retain_only_sha256_of_client_certs is true if we should compute the SHA256
   // hash of the peer's certificate and then discard it to save memory and
   // session space. Only effective on the server side.
@@ -4154,6 +4165,9 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
   // of support for AES hardware. The value is only considered if
   // |aes_hw_override| is true.
   bool aes_hw_override_value : 1;
+
+  // record_size_limit is whether to send record size limit extension.
+  uint16_t record_size_limit = 0;
 
  private:
   friend RefCounted;

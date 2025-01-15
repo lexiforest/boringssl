@@ -181,6 +181,9 @@ extern "C" {
 #define TLS1_AD_NO_APPLICATION_PROTOCOL 120
 #define TLS1_AD_ECH_REQUIRED 121  // draft-ietf-tls-esni-13
 
+// curl-impersonate
+#define TLSEXT_TYPE_record_size_limit 28
+
 // ExtensionType values from RFC 6066
 #define TLSEXT_TYPE_server_name 0
 #define TLSEXT_TYPE_status_request 5
@@ -287,6 +290,7 @@ extern "C" {
 // From https://www.rfc-editor.org/rfc/rfc8879.html#section-3
 #define TLSEXT_cert_compression_zlib 1
 #define TLSEXT_cert_compression_brotli 2
+#define TLSEXT_cert_compression_zstd 3
 
 #define TLSEXT_MAXLEN_host_name 255
 

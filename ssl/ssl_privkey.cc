@@ -961,3 +961,13 @@ int SSL_set_verify_algorithm_prefs(SSL *ssl, const uint16_t *prefs,
   return set_sigalg_prefs(&ssl->config->verify_sigalgs,
                           MakeConstSpan(prefs, num_prefs));
 }
+
+int SSL_CTX_set_delegated_credentials(SSL_CTX *ctx, const char *str) {  
+  Array<uint16_t> sigalgs;
+  if (!parse_sigalgs_list(&sigalgs, str)) {
+    return 0;
+  }
+
+  return set_sigalg_prefs(&ctx->delegated_credentials,
+                          MakeConstSpan(sigalgs.data(), sigalgs.size()));
+}

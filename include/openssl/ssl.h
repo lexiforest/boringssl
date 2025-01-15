@@ -5203,6 +5203,22 @@ OPENSSL_EXPORT int SSL_CTX_set1_sigalgs_list(SSL_CTX *ctx, const char *str);
 // more convenient to codesearch for specific algorithm values.
 OPENSSL_EXPORT int SSL_set1_sigalgs_list(SSL *ssl, const char *str);
 
+// curl-impersoante:
+// SSL_CTX_set_delegated_credentials sets the set of signature algorithms supported
+// by the client.
+OPENSSL_EXPORT int SSL_CTX_set_delegated_credentials(SSL_CTX *ctx, const char *str);
+
+// curl-impersoante:
+// SSL_set_record_size_limit configures whether sockets on |ssl| should
+// send record size limit extension.
+OPENSSL_EXPORT void SSL_set_record_size_limit(SSL *ssl, uint16_t limit);
+
+// curl-impersoante:
+// SSL_CTX_set_record_size_limit configures whether sockets on |ctx| should
+// send record size limit extension.
+OPENSSL_EXPORT void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit);
+
+
 #define SSL_set_app_data(s, arg) (SSL_set_ex_data(s, 0, (char *)(arg)))
 #define SSL_get_app_data(s) (SSL_get_ex_data(s, 0))
 #define SSL_SESSION_set_app_data(s, a) \
@@ -5582,6 +5598,8 @@ OPENSSL_EXPORT int SSL_CTX_set_tlsext_status_arg(SSL_CTX *ctx, void *arg);
 #define SSL_CURVE_SECP521R1 SSL_GROUP_SECP521R1
 #define SSL_CURVE_X25519 SSL_GROUP_X25519
 #define SSL_CURVE_X25519_KYBER768_DRAFT00 SSL_GROUP_X25519_KYBER768_DRAFT00
+#define SSL_CURVE_DHE2048 256
+#define SSL_CURVE_DHE3072 257
 
 // SSL_get_curve_id calls |SSL_get_group_id|.
 OPENSSL_EXPORT uint16_t SSL_get_curve_id(const SSL *ssl);

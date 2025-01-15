@@ -2793,6 +2793,27 @@ static bool ext_quic_transport_params_add_serverhello_legacy(SSL_HANDSHAKE *hs,
 static bool ext_delegated_credential_add_clienthello(
     const SSL_HANDSHAKE *hs, CBB *out, CBB *out_compressible,
     ssl_client_hello_type_t type) {
+  // curl-impersonate
+  if (hs->config->delegated_credentials.empty()) {
+    return true;
+  }
+
+  CBB contents, data;
+  const Array<uint16_t>& signature_hash_algorithms = hs->config->delegated_credentials;
+  if (!CBB_add_u16(out, TLSEXT_TYPE_delegated_credential) ||
+    !CBB_add_u16_length_prefixed(out, &contents) ||
+    !CBB_add_u16_length_prefixed(&contents, &data)) {
+    return false;
+  }
+
+  for (const uint16_t alg : signature_hash_algorithms) {
+    if (!CBB_add_u16(&data, alg)) {
+      return false;
+    }
+  }
+  if (!CBB_flush(out)) {
+    return false;
+  }
   return true;
 }
 
@@ -3143,6 +3164,40 @@ bool ssl_negotiate_alps(SSL_HANDSHAKE *hs, uint8_t *out_alert,
   return true;
 }
 
+// curl-impersonate
+static bool record_size_limit_add_clienthello(const SSL_HANDSHAKE* hs, CBB* out,
+                                              CBB* out_compressible,
+                                              ssl_client_hello_type_t type) {
+  if (hs->config->record_size_limit == 0) {
+    return true;
+  }
+
+  CBB data;
+  const uint16_t data_ = hs->config->record_size_limit;
+  if (!CBB_add_u16(out, TLSEXT_TYPE_record_size_limit) ||
+    !CBB_add_u16_length_prefixed(out, &data) || !CBB_add_u16(&data, data_) ||
+    !CBB_flush(out)) {
+    return false;
+  }
+  return true;
+}
+
+static bool record_size_limit_parse_serverhello(SSL_HANDSHAKE* hs,
+                                                uint8_t* out_alert,
+                                                CBS* contents) {
+  return true;
+}
+
+static bool record_size_limit_parse_clienthello(SSL_HANDSHAKE* hs,
+                                                uint8_t* out_alert,
+                                                CBS* contents) {
+  return true;
+}
+
+static bool record_size_limit_add_serverhello(SSL_HANDSHAKE* hs, CBB* out) {
+  return true;
+}
+
 // kExtensions contains all the supported extensions.
 static const struct tls_extension kExtensions[] = {
   {
@@ -3315,6 +3370,13 @@ static const struct tls_extension kExtensions[] = {
     // ALPS is negotiated late in |ssl_negotiate_alpn|.
     ignore_parse_clienthello,
     ext_alps_add_serverhello,
+  },
+  {
+    TLSEXT_TYPE_record_size_limit,
+    record_size_limit_add_clienthello,
+    record_size_limit_parse_serverhello,
+    record_size_limit_parse_clienthello,
+    record_size_limit_add_serverhello,
   },
   {
     TLSEXT_TYPE_application_settings_old,

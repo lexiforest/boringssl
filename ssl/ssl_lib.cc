@@ -667,7 +667,8 @@ SSL *SSL_new(SSL_CTX *ctx) {
   if (!ssl->config->supported_group_list.CopyFrom(ctx->supported_group_list) ||
       !ssl->config->alpn_client_proto_list.CopyFrom(
           ctx->alpn_client_proto_list) ||
-      !ssl->config->verify_sigalgs.CopyFrom(ctx->verify_sigalgs)) {
+      !ssl->config->verify_sigalgs.CopyFrom(ctx->verify_sigalgs) ||
+      !ssl->config->delegated_credentials.CopyFrom(ctx->delegated_credentials)) {
     return nullptr;
   }
 
@@ -687,6 +688,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->signed_cert_timestamps_enabled =
       ctx->signed_cert_timestamps_enabled;
   ssl->config->ocsp_stapling_enabled = ctx->ocsp_stapling_enabled;
+  ssl->config->record_size_limit = ctx->record_size_limit;
   ssl->config->handoff = ctx->handoff;
   ssl->quic_method = ctx->quic_method;
 
@@ -2215,6 +2217,17 @@ void SSL_enable_ocsp_stapling(SSL *ssl) {
     return;
   }
   ssl->config->ocsp_stapling_enabled = true;
+}
+
+void SSL_set_record_size_limit(SSL *ssl, uint16_t limit) {
+  if (!ssl->config) {
+    return;
+  }
+  ssl->config->record_size_limit = limit;
+}
+
+void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit) {
+  ctx->record_size_limit = limit;
 }
 
 void SSL_get0_signed_cert_timestamp_list(const SSL *ssl, const uint8_t **out,

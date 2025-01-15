@@ -4258,6 +4258,12 @@ extern "C" {
 #define SN_X25519MLKEM768 "X25519MLKEM768"
 #define NID_X25519MLKEM768 965
 
+#define SN_ffdhe2048 "ffdhe2048"
+#define NID_ffdhe2048 966
+
+#define SN_ffdhe3072 "ffdhe3072"
+#define NID_ffdhe3072 967
+
 
 #if defined(__cplusplus)
 } /* extern C */
