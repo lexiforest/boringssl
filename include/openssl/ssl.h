@@ -5218,6 +5218,16 @@ OPENSSL_EXPORT void SSL_set_record_size_limit(SSL *ssl, uint16_t limit);
 // send record size limit extension.
 OPENSSL_EXPORT void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit);
 
+// curl-imperonsate:
+// SSL_set_key_shares_limit configures whether sockets on |ssl| should
+// send three key shares.
+OPENSSL_EXPORT void SSL_set_key_shares_limit(SSL *ssl, uint8_t limit);
+
+// curl-impersonate:
+// SSL_CTX_set_key_shares_limit configures whether sockets on |ctx| should
+// send three key shares.
+OPENSSL_EXPORT void SSL_CTX_set_key_shares_limit(SSL_CTX *ctx, uint8_t limit);
+
 
 #define SSL_set_app_data(s, arg) (SSL_set_ex_data(s, 0, (char *)(arg)))
 #define SSL_get_app_data(s) (SSL_get_ex_data(s, 0))

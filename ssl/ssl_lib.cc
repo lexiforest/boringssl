@@ -539,7 +539,8 @@ ssl_ctx_st::ssl_ctx_st(const SSL_METHOD *ssl_method)
       handoff(false),
       enable_early_data(false),
       aes_hw_override(false),
-      aes_hw_override_value(false) {
+      aes_hw_override_value(false),
+      key_shares_limit(0) {
   CRYPTO_MUTEX_init(&lock);
   CRYPTO_new_ex_data(&ex_data);
 }
@@ -663,6 +664,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->aes_hw_override = ctx->aes_hw_override;
   ssl->config->aes_hw_override_value = ctx->aes_hw_override_value;
   ssl->config->tls13_cipher_policy = ctx->tls13_cipher_policy;
+  ssl->config->key_shares_limit = ctx->key_shares_limit;
 
   if (!ssl->config->supported_group_list.CopyFrom(ctx->supported_group_list) ||
       !ssl->config->alpn_client_proto_list.CopyFrom(
@@ -713,6 +715,7 @@ SSL_CONFIG::SSL_CONFIG(SSL *ssl_arg)
       jdk11_workaround(false),
       quic_use_legacy_codepoint(false),
       permute_extensions(false),
+      key_shares_limit(0),
       alps_use_new_codepoint(false),
       check_client_certificate_type(true),
       check_ecdsa_curve(true) {
@@ -2228,6 +2231,17 @@ void SSL_set_record_size_limit(SSL *ssl, uint16_t limit) {
 
 void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit) {
   ctx->record_size_limit = limit;
+}
+
+void SSL_set_key_shares_limit(SSL *ssl, uint8_t limit) {
+  if (!ssl->config) {
+    return;
+  }
+  ssl->config->key_shares_limit = limit;
+}
+
+void SSL_CTX_set_key_shares_limit(SSL_CTX *ctx, uint8_t limit) {
+  ctx->key_shares_limit = limit;
 }
 
 void SSL_get0_signed_cert_timestamp_list(const SSL *ssl, const uint8_t **out,

@@ -2219,7 +2219,15 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
   SSL *const ssl = hs->ssl;
   hs->key_shares[0].reset();
   hs->key_shares[1].reset();
+  hs->key_shares[2].reset();
   hs->key_share_bytes.Reset();
+  // If key_shares_limit is set, use it. Otherwise, use the default of 2.
+  const uint8_t key_shares_limit = hs->ssl->config->key_shares_limit;
+  // The key_shares_limit is set by the user, so it is a custom value.
+  const bool is_custom = key_shares_limit != 0;
+  const uint8_t limit = (key_shares_limit >= 1 && key_shares_limit <= 3) ? key_shares_limit : 2;
+  const bool enable_second_key_share = (limit >= 2);
+  const bool enable_three_key_shares = (limit >= 3);
 
   if (hs->max_version < TLS1_3_VERSION) {
     return true;
@@ -2241,6 +2249,7 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
 
   uint16_t group_id = override_group_id;
   uint16_t second_group_id = 0;
+  uint16_t third_group_id = 0;
   if (override_group_id == 0) {
     // Predict the most preferred group.
     Span<const uint16_t> groups = tls1_get_grouplist(hs);
@@ -2250,13 +2259,14 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
     }
 
     group_id = groups[0];
-
-    // We'll try to include one post-quantum and one classical initial key
-    // share.
-    for (size_t i = 1; i < groups.size() && second_group_id == 0; i++) {
-      if (is_post_quantum_group(group_id) != is_post_quantum_group(groups[i])) {
+    // Include one post-quantum and one classical initial key share.
+    for (size_t i = 1; i < groups.size(); i++) {
+      if (enable_second_key_share && second_group_id == 0 && (is_custom || (is_post_quantum_group(group_id) != is_post_quantum_group(groups[i])))) {
         second_group_id = groups[i];
         assert(second_group_id != group_id);
+      } else if (enable_three_key_shares && third_group_id == 0 && 
+                 (is_custom || is_post_quantum_group(group_id) != is_post_quantum_group(groups[i]))) {
+        third_group_id = groups[i];
       }
     }
   }
@@ -2276,6 +2286,16 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
         !CBB_add_u16(cbb.get(), second_group_id) ||
         !CBB_add_u16_length_prefixed(cbb.get(), &key_exchange) ||
         !hs->key_shares[1]->Generate(&key_exchange)) {
+      return false;
+    }
+  }
+
+  if (third_group_id != 0) {
+    hs->key_shares[2] = SSLKeyShare::Create(third_group_id);
+    if (!hs->key_shares[2] ||  //
+        !CBB_add_u16(cbb.get(), third_group_id) ||
+        !CBB_add_u16_length_prefixed(cbb.get(), &key_exchange) ||
+        !hs->key_shares[2]->Generate(&key_exchange)) {
       return false;
     }
   }

@@ -2196,7 +2196,7 @@ struct SSL_HANDSHAKE {
   // key_shares are the current key exchange instances. The second is only used
   // as a client if we believe that we should offer two key shares in a
   // ClientHello.
-  UniquePtr<SSLKeyShare> key_shares[2];
+  UniquePtr<SSLKeyShare> key_shares[3];
 
   // transcript is the current handshake transcript.
   SSLTranscript transcript;
@@ -3529,6 +3529,9 @@ struct SSL_CONFIG {
   // curl-impersonate: record_size_limit is whether to send record size limit extension.
   uint16_t record_size_limit = 0;
 
+  // curl-impersonate: key_shares_limit is the maximum number of key shares to send.
+  uint8_t key_shares_limit = 0;
+
   // aes_hw_override_value is used for testing to indicate the support or lack
   // of support for AES hw. The value is only considered if |aes_hw_override| is
   // true.
@@ -4166,8 +4169,11 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
   // |aes_hw_override| is true.
   bool aes_hw_override_value : 1;
 
-  // record_size_limit is whether to send record size limit extension.
+  // curl-impersonate: record_size_limit is whether to send record size limit extension.
   uint16_t record_size_limit = 0;
+
+  // curl-impersonate: key_shares limit is the maximum number of key shares to send.
+  uint8_t key_shares_limit = 0;
 
  private:
   friend RefCounted;
