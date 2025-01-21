@@ -2338,13 +2338,20 @@ bool ssl_ext_key_share_parse_serverhello(SSL_HANDSHAKE *hs,
   }
 
   SSLKeyShare *key_share = hs->key_shares[0].get();
+  // group_id is the server chosen group_id, and if key_share[0] is not chosen
   if (key_share->GroupID() != group_id) {
+    // the server also did not choose the second one
     if (!hs->key_shares[1] || hs->key_shares[1]->GroupID() != group_id) {
-      *out_alert = SSL_AD_ILLEGAL_PARAMETER;
-      OPENSSL_PUT_ERROR(SSL, SSL_R_WRONG_CURVE);
-      return false;
+      // the server also did not choose the third one, we are out of options
+      if (!hs->key_shares[2] || hs->key_shares[2]->GroupID() != group_id) {
+        *out_alert = SSL_AD_ILLEGAL_PARAMETER;
+        OPENSSL_PUT_ERROR(SSL, SSL_R_WRONG_CURVE);
+        return false;
+      }
+      key_share = hs->key_shares[2].get();  // choose the third one
+    } else {
+      key_share = hs->key_shares[1].get();  // choose the second one
     }
-    key_share = hs->key_shares[1].get();
   }
 
   if (!key_share->Decap(out_secret, out_alert, ciphertext)) {
@@ -2352,9 +2359,11 @@ bool ssl_ext_key_share_parse_serverhello(SSL_HANDSHAKE *hs,
     return false;
   }
 
+  // choose the first one
   hs->new_session->group_id = group_id;
   hs->key_shares[0].reset();
   hs->key_shares[1].reset();
+  hs->key_shares[2].reset();
   return true;
 }
 
