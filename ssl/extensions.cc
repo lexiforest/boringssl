@@ -3501,19 +3501,12 @@ bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
   char *ext = strtok(tmp, delimiter);
   size_t idx = 0;
   while (ext != nullptr) {
-    unsigned ext_index;
+    unsigned ext_index = 0;
     tls_extension_find(&ext_index, atoi(ext));
-    // fprintf(stderr, "found %d -> %d, ", atoi(ext), ext_index);
     order[idx] = ext_index;
     ext = strtok(NULL, delimiter);
     idx++;
   }
-  // fprintf(stderr, "\n");
-  // fprintf(stderr, "the order is set to:");
-  // for (size_t i = 0; i < kNumExtensions; i++) {
-  //   fprintf(stderr, "%d, ", order[i]);
-  // }
-  // fprintf(stderr, "\n");
   free(tmp);
 
   hs->extension_permutation = std::move(order);
