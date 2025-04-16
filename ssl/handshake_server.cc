@@ -1,13 +1,18 @@
-/*
- * Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
- * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2005 Nokia. All rights reserved.
- *
- * Licensed under the OpenSSL license (the "License").  You may not use
- * this file except in compliance with the License.  You can obtain a copy
- * in the file LICENSE in the source distribution or at
- * https://www.openssl.org/source/license.html
- */
+// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+// Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
+// Copyright 2005 Nokia. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <openssl/ssl.h>
 
@@ -240,7 +245,7 @@ static TLS12ServerParams choose_params(SSL_HANDSHAKE *hs,
     // ECDSA keys must additionally be checked against the peer's supported
     // curve list.
     int key_type = EVP_PKEY_id(cred->pubkey.get());
-    if (hs->config->check_ecdsa_curve && key_type == EVP_PKEY_EC) {
+    if (key_type == EVP_PKEY_EC) {
       EC_KEY *ec_key = EVP_PKEY_get0_EC_KEY(cred->pubkey.get());
       uint16_t group_id;
       if (!ssl_nid_to_group_id(
@@ -268,9 +273,12 @@ static TLS12ServerParams choose_params(SSL_HANDSHAKE *hs,
 
   TLS12ServerParams params;
   params.cipher = choose_cipher(hs, client_pref, mask_k, mask_a);
-  if (params.cipher == nullptr) {
+  if (params.cipher == nullptr ||
+      (cred != nullptr &&
+       !ssl_credential_matches_requested_issuers(hs, cred))) {
     return TLS12ServerParams();
   }
+  // Only report the selected signature algorithm if it will be used.
   if (ssl_cipher_requires_server_key_exchange(params.cipher) &&
       ssl_cipher_uses_certificate_auth(params.cipher)) {
     params.signature_algorithm = sigalg;
@@ -527,8 +535,8 @@ static enum ssl_hs_wait_t do_read_client_hello(SSL_HANDSHAKE *hs) {
   }
 
   SSL_CLIENT_HELLO client_hello;
-  if (!ssl_client_hello_init(ssl, &client_hello, msg.body)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_R_DECODE_ERROR);
+  if (!SSL_parse_client_hello(ssl, &client_hello, CBS_data(&msg.body),
+                              CBS_len(&msg.body))) {
     ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
     return ssl_hs_error;
   }
@@ -731,7 +739,7 @@ static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
     return ssl_hs_error;
   }
   Array<SSL_CREDENTIAL *> creds;
-  if (!ssl_get_credential_list(hs, &creds)) {
+  if (!ssl_get_full_credential_list(hs, &creds)) {
     return ssl_hs_error;
   }
   TLS12ServerParams params;
@@ -752,13 +760,14 @@ static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
   }
   if (!params.ok()) {
     // The error from the last attempt is in the error queue.
+    assert(ERR_peek_error() != 0);
     ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
     return ssl_hs_error;
   }
   hs->new_cipher = params.cipher;
   hs->signature_algorithm = params.signature_algorithm;
 
-  // |ssl_client_hello_init| checks that |client_hello.session_id| is not too
+  // |SSL_parse_client_hello| checks that |client_hello.session_id| is not too
   // large.
   hs->session_id.CopyFrom(
       Span(client_hello.session_id, client_hello.session_id_len));
@@ -827,18 +836,10 @@ static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
       hs->new_session->group_id = group_id;
     }
 
-    // Determine whether to request a client certificate.
-    hs->cert_request = !!(hs->config->verify_mode & SSL_VERIFY_PEER);
-    // Only request a certificate if Channel ID isn't negotiated.
-    if ((hs->config->verify_mode & SSL_VERIFY_PEER_IF_NO_OBC) &&
-        hs->channel_id_negotiated) {
-      hs->cert_request = false;
-    }
-    // CertificateRequest may only be sent in certificate-based ciphers.
-    if (!ssl_cipher_uses_certificate_auth(hs->new_cipher)) {
-      hs->cert_request = false;
-    }
-
+    // Determine whether to request a client certificate. CertificateRequest may
+    // only be sent in certificate-based ciphers.
+    hs->cert_request = (hs->config->verify_mode & SSL_VERIFY_PEER) &&
+                       ssl_cipher_uses_certificate_auth(hs->new_cipher);
     if (!hs->cert_request) {
       // OpenSSL returns X509_V_OK when no certificates are requested. This is
       // classed by them as a bug, but it's assumed by at least NGINX.

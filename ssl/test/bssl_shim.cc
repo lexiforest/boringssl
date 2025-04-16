@@ -1,16 +1,16 @@
-/* Copyright 2014 The BoringSSL Authors
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
+// Copyright 2014 The BoringSSL Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <openssl/base.h>
 
@@ -57,7 +57,6 @@ OPENSSL_MSVC_PRAGMA(comment(lib, "Ws2_32.lib"))
 #include <vector>
 
 #include "../../crypto/internal.h"
-#include "../internal.h"
 #include "async_bio.h"
 #include "handshake_util.h"
 #include "mock_quic_transport.h"
@@ -323,8 +322,7 @@ static bool CheckAuthProperties(SSL *ssl, bool is_resume,
     const uint8_t *data;
     size_t len;
     SSL_get0_ocsp_response(ssl, &data, &len);
-    if (bssl::StringAsBytes(config->expect_ocsp_response) !=
-        bssl::Span(data, len)) {
+    if (bssl::Span(config->expect_ocsp_response) != bssl::Span(data, len)) {
       fprintf(stderr, "OCSP response mismatch\n");
       return false;
     }
@@ -334,7 +332,7 @@ static bool CheckAuthProperties(SSL *ssl, bool is_resume,
     const uint8_t *data;
     size_t len;
     SSL_get0_signed_cert_timestamp_list(ssl, &data, &len);
-    if (bssl::StringAsBytes(config->expect_signed_cert_timestamps) !=
+    if (bssl::Span(config->expect_signed_cert_timestamps) !=
         bssl::Span(data, len)) {
       fprintf(stderr, "SCT list mismatch\n");
       return false;
@@ -424,6 +422,12 @@ static bool CheckAuthProperties(SSL *ssl, bool is_resume,
   }
 
   return true;
+}
+
+static bool IsPAKE(const SSL *ssl) {
+  int idx = GetTestState(ssl)->selected_credential;
+  return idx >= 0 && GetTestConfig(ssl)->credentials[idx].type ==
+                         CredentialConfigType::kSPAKE2PlusV1;
 }
 
 // CheckHandshakeProperties checks, immediately after |ssl| completes its
@@ -554,7 +558,7 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     const uint8_t *peer_params;
     size_t peer_params_len;
     SSL_get_peer_quic_transport_params(ssl, &peer_params, &peer_params_len);
-    if (bssl::StringAsBytes(config->expect_quic_transport_params) !=
+    if (bssl::Span(config->expect_quic_transport_params) !=
         bssl::Span(peer_params, peer_params_len)) {
       fprintf(stderr, "QUIC transport params mismatch\n");
       return false;
@@ -567,7 +571,7 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
       fprintf(stderr, "no channel id negotiated\n");
       return false;
     }
-    if (bssl::StringAsBytes(config->expect_channel_id) != channel_id) {
+    if (bssl::Span(config->expect_channel_id) != channel_id) {
       fprintf(stderr, "channel id mismatch\n");
       return false;
     }
@@ -661,6 +665,11 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
       fprintf(stderr, "Received peer certificate on a PSK cipher.\n");
       return false;
     }
+  } else if (IsPAKE(ssl)) {
+    if (SSL_get_peer_cert_chain(ssl) != nullptr) {
+      fprintf(stderr, "Received peer certificate on a PAKE handshake.\n");
+      return false;
+    }
   } else if (!config->is_server || config->require_any_client_certificate) {
     if (SSL_get_peer_cert_chain(ssl) == nullptr) {
       fprintf(stderr, "Received no peer certificate but expected one.\n");
@@ -675,9 +684,10 @@ static bool CheckHandshakeProperties(SSL *ssl, bool is_resume,
     return false;
   }
 
-  if (config->expect_selected_credential != state->selected_credential) {
+  if (config->expect_selected_credential.has_value() &&
+      *config->expect_selected_credential != state->selected_credential) {
     fprintf(stderr, "Credential %d was used, wanted %d\n",
-            state->selected_credential, config->expect_selected_credential);
+            state->selected_credential, *config->expect_selected_credential);
     return false;
   }
 
@@ -907,7 +917,7 @@ static bool DoConnection(bssl::UniquePtr<SSL_SESSION> *out_session,
     bssl::Span<const uint8_t> expected =
         config->expect_no_ech_retry_configs
             ? bssl::Span<const uint8_t>()
-            : bssl::StringAsBytes(config->expect_ech_retry_configs);
+            : bssl::Span(config->expect_ech_retry_configs);
     if (ret) {
       fprintf(stderr, "Expected ECH rejection, but connection succeeded.\n");
       return false;
@@ -1257,7 +1267,7 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
 
   if (GetProtocolVersion(ssl) >= TLS1_3_VERSION && !config->is_server) {
     bool expect_new_session =
-        !config->expect_no_session && !config->shim_shuts_down;
+        !config->expect_no_session && !config->shim_shuts_down && !IsPAKE(ssl);
     if (expect_new_session != test_state->got_new_session) {
       fprintf(stderr,
               "new session was%s cached, but we expected the opposite\n",
@@ -1266,7 +1276,8 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
     }
 
     if (expect_new_session) {
-      bool got_early_data = test_state->new_session->ticket_max_early_data != 0;
+      bool got_early_data =
+          !!SSL_SESSION_early_data_capable(test_state->new_session.get());
       if (config->expect_ticket_supports_early_data != got_early_data) {
         fprintf(stderr,
                 "new session did%s support early data, but we expected the "
@@ -1300,7 +1311,7 @@ static bool DoExchange(bssl::UniquePtr<SSL_SESSION> *out_session,
   }
 
   if (SSL_total_renegotiations(ssl) > 0) {
-    if (!SSL_get_session(ssl)->not_resumable) {
+    if (SSL_SESSION_is_resumable(SSL_get_session(ssl))) {
       fprintf(stderr,
               "Renegotiations should never produce resumable sessions.\n");
       return false;

@@ -1,16 +1,16 @@
 // Copyright 2016 The BoringSSL Authors
 //
-// Permission to use, copy, modify, and/or distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package runner
 
@@ -47,8 +47,8 @@ import (
 	"syscall"
 	"time"
 
-	"boringssl.googlesource.com/boringssl/ssl/test/runner/hpke"
-	"boringssl.googlesource.com/boringssl/util/testresult"
+	"boringssl.googlesource.com/boringssl.git/ssl/test/runner/hpke"
+	"boringssl.googlesource.com/boringssl.git/util/testresult"
 	"golang.org/x/crypto/cryptobyte"
 )
 
@@ -205,13 +205,17 @@ func initKeys() {
 
 var channelIDBytes []byte
 
-var testOCSPResponse = []byte{1, 2, 3, 4}
-var testOCSPResponse2 = []byte{5, 6, 7, 8}
-var testSCTList = []byte{0, 6, 0, 4, 5, 6, 7, 8}
-var testSCTList2 = []byte{0, 6, 0, 4, 1, 2, 3, 4}
+var (
+	testOCSPResponse  = []byte{1, 2, 3, 4}
+	testOCSPResponse2 = []byte{5, 6, 7, 8}
+	testSCTList       = []byte{0, 6, 0, 4, 5, 6, 7, 8}
+	testSCTList2      = []byte{0, 6, 0, 4, 1, 2, 3, 4}
+)
 
-var testOCSPExtension = append([]byte{byte(extensionStatusRequest) >> 8, byte(extensionStatusRequest), 0, 8, statusTypeOCSP, 0, 0, 4}, testOCSPResponse...)
-var testSCTExtension = append([]byte{byte(extensionSignedCertificateTimestamp) >> 8, byte(extensionSignedCertificateTimestamp), 0, byte(len(testSCTList))}, testSCTList...)
+var (
+	testOCSPExtension = append([]byte{byte(extensionStatusRequest) >> 8, byte(extensionStatusRequest), 0, 8, statusTypeOCSP, 0, 0, 4}, testOCSPResponse...)
+	testSCTExtension  = append([]byte{byte(extensionSignedCertificateTimestamp) >> 8, byte(extensionSignedCertificateTimestamp), 0, byte(len(testSCTList))}, testSCTList...)
+)
 
 var (
 	rsaCertificate       Credential
@@ -227,18 +231,21 @@ var (
 
 func initCertificates() {
 	for _, def := range []struct {
-		key crypto.Signer
-		out *Credential
+		name string
+		key  crypto.Signer
+		out  *Credential
 	}{
-		{&rsa1024Key, &rsa1024Certificate},
-		{&rsa2048Key, &rsaCertificate},
-		{&ecdsaP224Key, &ecdsaP224Certificate},
-		{&ecdsaP256Key, &ecdsaP256Certificate},
-		{&ecdsaP384Key, &ecdsaP384Certificate},
-		{&ecdsaP521Key, &ecdsaP521Certificate},
-		{ed25519Key, &ed25519Certificate},
+		{"Test RSA-1024 Cert", &rsa1024Key, &rsa1024Certificate},
+		{"Test RSA-2048 Cert", &rsa2048Key, &rsaCertificate},
+		{"Test ECDSA P-224 Cert", &ecdsaP224Key, &ecdsaP224Certificate},
+		{"Test ECDSA P-256 Cert", &ecdsaP256Key, &ecdsaP256Certificate},
+		{"Test ECDSA P-384 Cert", &ecdsaP384Key, &ecdsaP384Certificate},
+		{"Test ECDSA P-521 Cert", &ecdsaP521Key, &ecdsaP521Certificate},
+		{"Test Ed25519 Cert", ed25519Key, &ed25519Certificate},
 	} {
-		*def.out = generateSingleCertChain(nil, def.key)
+		template := *baseCertTemplate
+		template.Subject.CommonName = def.name
+		*def.out = generateSingleCertChain(&template, def.key)
 	}
 
 	channelIDBytes = make([]byte, 64)
@@ -263,12 +270,13 @@ func initCertificates() {
 	rootCertPath, chainPath := writeTempCertFile([]*x509.Certificate{rootCert}), writeTempCertFile([]*x509.Certificate{leafCert, intermediateCert})
 
 	rsaChainCertificate = Credential{
-		Certificate: [][]byte{leafCert.Raw, intermediateCert.Raw},
-		PrivateKey:  &rsa2048Key,
-		Leaf:        leafCert,
-		ChainPath:   chainPath,
-		KeyPath:     keyPath,
-		RootPath:    rootCertPath,
+		Certificate:     [][]byte{leafCert.Raw, intermediateCert.Raw},
+		RootCertificate: rootCert.Raw,
+		PrivateKey:      &rsa2048Key,
+		Leaf:            leafCert,
+		ChainPath:       chainPath,
+		KeyPath:         keyPath,
+		RootPath:        rootCertPath,
 	}
 }
 
@@ -682,7 +690,8 @@ type testCase struct {
 	// shimCredentials is a list of credentials which should be configured at
 	// the shim. It differs from shimCertificate only in whether the old or
 	// new APIs are used.
-	shimCredentials []*Credential
+	shimCredentials       []*Credential
+	resumeShimCredentials []*Credential
 }
 
 var testCases []testCase
@@ -1071,7 +1080,7 @@ func doExchange(test *testCase, config *Config, conn net.Conn, isResume bool, tr
 		// If readWithUnfinishedWrite is set, the shim prefix will be
 		// available later.
 		if shimPrefix != "" && !test.readWithUnfinishedWrite {
-			var buf = make([]byte, len(shimPrefix))
+			buf := make([]byte, len(shimPrefix))
 			_, err := io.ReadFull(tlsConn, buf)
 			if err != nil {
 				return err
@@ -1165,7 +1174,7 @@ func doExchange(test *testCase, config *Config, conn net.Conn, isResume bool, tr
 
 		// Consume the shim prefix if needed.
 		if shimPrefix != "" {
-			var buf = make([]byte, len(shimPrefix))
+			buf := make([]byte, len(shimPrefix))
 			_, err := io.ReadFull(tlsConn, buf)
 			if err != nil {
 				return err
@@ -1464,11 +1473,19 @@ func appendCredentialFlags(flags []string, cred *Credential, prefix string, newC
 			flags = append(flags, prefix+"-new-x509-credential")
 		case CredentialTypeDelegated:
 			flags = append(flags, prefix+"-new-delegated-credential")
+		case CredentialTypeSPAKE2PlusV1:
+			flags = append(flags, prefix+"-new-spake2plusv1-credential")
 		default:
 			panic(fmt.Errorf("unknown credential type %d", cred.Type))
 		}
 	} else if cred.Type != CredentialTypeX509 {
 		panic("default credential must be X.509")
+	}
+
+	handleBase64Field := func(flag string, value []byte) {
+		if len(value) != 0 {
+			flags = append(flags, fmt.Sprintf("%s-%s", prefix, flag), base64FlagValue(value))
+		}
 	}
 
 	if len(cred.ChainPath) != 0 {
@@ -1477,17 +1494,21 @@ func appendCredentialFlags(flags []string, cred *Credential, prefix string, newC
 	if len(cred.KeyPath) != 0 {
 		flags = append(flags, prefix+"-key-file", cred.KeyPath)
 	}
-	if len(cred.OCSPStaple) != 0 {
-		flags = append(flags, prefix+"-ocsp-response", base64FlagValue(cred.OCSPStaple))
-	}
-	if len(cred.SignedCertificateTimestampList) != 0 {
-		flags = append(flags, prefix+"-signed-cert-timestamps", base64FlagValue(cred.SignedCertificateTimestampList))
-	}
+	handleBase64Field("ocsp-response", cred.OCSPStaple)
+	handleBase64Field("signed-cert-timestamps", cred.SignedCertificateTimestampList)
 	for _, sigAlg := range cred.SignatureAlgorithms {
 		flags = append(flags, prefix+"-signing-prefs", strconv.Itoa(int(sigAlg)))
 	}
-	if len(cred.DelegatedCredential) != 0 {
-		flags = append(flags, prefix+"-delegated-credential", base64FlagValue(cred.DelegatedCredential))
+	handleBase64Field("delegated-credential", cred.DelegatedCredential)
+	if cred.MustMatchIssuer {
+		flags = append(flags, prefix+"-must-match-issuer")
+	}
+	handleBase64Field("pake-context", cred.PAKEContext)
+	handleBase64Field("pake-client-id", cred.PAKEClientID)
+	handleBase64Field("pake-server-id", cred.PAKEServerID)
+	handleBase64Field("pake-password", cred.PAKEPassword)
+	if cred.WrongPAKERole {
+		flags = append(flags, prefix+"-wrong-pake-role")
 	}
 	return flags
 }
@@ -1511,7 +1532,7 @@ func runTest(dispatcher *shimDispatcher, statusChan chan statusMsg, test *testCa
 
 	// Configure the default credential.
 	shimCertificate := test.shimCertificate
-	if shimCertificate == nil && len(test.shimCredentials) == 0 && test.testType == serverTest && len(test.config.PreSharedKey) == 0 {
+	if shimCertificate == nil && len(test.shimCredentials) == 0 && len(test.resumeShimCredentials) == 0 && test.testType == serverTest && len(test.config.PreSharedKey) == 0 {
 		shimCertificate = &rsaCertificate
 	}
 	if shimCertificate != nil {
@@ -1528,6 +1549,9 @@ func runTest(dispatcher *shimDispatcher, statusChan chan statusMsg, test *testCa
 	// Configure any additional credentials.
 	for _, cred := range test.shimCredentials {
 		flags = appendCredentialFlags(flags, cred, "", true)
+	}
+	for _, cred := range test.resumeShimCredentials {
+		flags = appendCredentialFlags(flags, cred, "-on-resume", true)
 	}
 
 	if test.protocol == dtls {
@@ -2009,6 +2033,7 @@ NextTest:
 		if test.protocol != tls ||
 			test.testType != serverTest ||
 			len(test.shimCredentials) != 0 ||
+			len(test.resumeShimCredentials) != 0 ||
 			strings.Contains(test.name, "ECH-Server") ||
 			test.skipSplitHandshake {
 			continue
@@ -2110,16 +2135,6 @@ func addBasicTests() {
 			shimCertificate: &rsaCertificate,
 			shouldFail:      true,
 			expectedError:   ":UNKNOWN_CERTIFICATE_TYPE:",
-		},
-		{
-			name: "NoCheckClientCertificateTypes",
-			config: Config{
-				MaxVersion:             VersionTLS12,
-				ClientAuth:             RequestClientCert,
-				ClientCertificateTypes: []byte{CertTypeECDSASign},
-			},
-			shimCertificate: &rsaCertificate,
-			flags:           []string{"-no-check-client-certificate-type"},
 		},
 		{
 			name: "UnauthenticatedECDH",
@@ -4572,7 +4587,7 @@ func addCBCPaddingTests() {
 }
 
 func addCBCSplittingTests() {
-	var cbcCiphers = []struct {
+	cbcCiphers := []struct {
 		name   string
 		cipher uint16
 	}{
@@ -4624,16 +4639,21 @@ func addCBCSplittingTests() {
 	}
 }
 
-func addClientAuthTests() {
-	// Add a dummy cert pool to stress certificate authority parsing.
+func makeCertPoolFromRoots(creds ...*Credential) *x509.CertPool {
 	certPool := x509.NewCertPool()
-	for _, cert := range []Credential{rsaCertificate, rsa1024Certificate} {
-		cert, err := x509.ParseCertificate(cert.Certificate[0])
+	for _, cred := range creds {
+		cert, err := x509.ParseCertificate(cred.RootCertificate)
 		if err != nil {
 			panic(err)
 		}
 		certPool.AddCert(cert)
 	}
+	return certPool
+}
+
+func addClientAuthTests() {
+	// Add a dummy cert pool to stress certificate authority parsing.
+	certPool := makeCertPoolFromRoots(&rsaCertificate, &rsa1024Certificate)
 	caNames := certPool.Subjects()
 
 	for _, ver := range tlsVersions {
@@ -4759,39 +4779,6 @@ func addClientAuthTests() {
 
 		testCases = append(testCases, testCase{
 			testType: serverTest,
-			name:     "VerifyPeerIfNoOBC-NoChannelID-" + ver.name,
-			config: Config{
-				MinVersion: ver.version,
-				MaxVersion: ver.version,
-			},
-			flags: []string{
-				"-enable-channel-id",
-				"-verify-peer-if-no-obc",
-			},
-			shouldFail:         true,
-			expectedError:      ":PEER_DID_NOT_RETURN_A_CERTIFICATE:",
-			expectedLocalError: certificateRequired,
-		})
-
-		testCases = append(testCases, testCase{
-			testType: serverTest,
-			name:     "VerifyPeerIfNoOBC-ChannelID-" + ver.name,
-			config: Config{
-				MinVersion: ver.version,
-				MaxVersion: ver.version,
-				ChannelID:  &channelIDKey,
-			},
-			expectations: connectionExpectations{
-				channelID: true,
-			},
-			flags: []string{
-				"-enable-channel-id",
-				"-verify-peer-if-no-obc",
-			},
-		})
-
-		testCases = append(testCases, testCase{
-			testType: serverTest,
 			name:     ver.name + "-Server-CertReq-CA-List",
 			config: Config{
 				MinVersion: ver.version,
@@ -4877,22 +4864,20 @@ func addClientAuthTests() {
 	})
 
 	// Test that an empty client CA list doesn't send a CA extension.
+	// (This is implicitly tested by the parser. An empty CA extension is
+	// a syntax error.)
 	testCases = append(testCases, testCase{
 		testType: serverTest,
 		name:     "TLS13-Empty-Client-CA-List",
 		config: Config{
 			MaxVersion: VersionTLS13,
 			Credential: &rsaCertificate,
-			Bugs: ProtocolBugs{
-				ExpectNoCertificateAuthoritiesExtension: true,
-			},
 		},
 		flags: []string{
 			"-require-any-client-certificate",
 			"-use-client-ca-list", "<EMPTY>",
 		},
 	})
-
 }
 
 func addExtendedMasterSecretTests() {
@@ -7802,7 +7787,7 @@ func addExtensionTests() {
 						config: Config{
 							MaxVersion:          ver.version,
 							NextProtos:          []string{"proto"},
-							ApplicationSettings: map[string][]byte{"proto": []byte{}},
+							ApplicationSettings: map[string][]byte{"proto": {}},
 							ALPSUseNewCodepoint: alpsCodePoint,
 						},
 						resumeSession: true,
@@ -7822,7 +7807,7 @@ func addExtensionTests() {
 						config: Config{
 							MaxVersion:          ver.version,
 							NextProtos:          []string{"proto"},
-							ApplicationSettings: map[string][]byte{"proto": []byte{}},
+							ApplicationSettings: map[string][]byte{"proto": {}},
 							ALPSUseNewCodepoint: alpsCodePoint,
 						},
 						resumeSession: true,
@@ -7887,7 +7872,7 @@ func addExtensionTests() {
 						config: Config{
 							MaxVersion:          ver.version,
 							NextProtos:          []string{"proto"},
-							ApplicationSettings: map[string][]byte{"proto": []byte{}},
+							ApplicationSettings: map[string][]byte{"proto": {}},
 							Bugs:                bugs,
 							ALPSUseNewCodepoint: alpsCodePoint,
 						},
@@ -8749,7 +8734,7 @@ func addExtensionTests() {
 					resumeSession: true,
 					shouldFail:    true,
 					// The maximum session ID length is 32.
-					expectedError: ":DECODE_ERROR:",
+					expectedError: ":CLIENTHELLO_PARSE_FAILED:",
 				})
 			}
 
@@ -10467,8 +10452,10 @@ var testSignatureAlgorithms = []struct {
 	{"ECDSA", 0, &ecdsaP256Certificate, CurveP256},
 }
 
-const fakeSigAlg1 signatureAlgorithm = 0x2a01
-const fakeSigAlg2 signatureAlgorithm = 0xff01
+const (
+	fakeSigAlg1 signatureAlgorithm = 0x2a01
+	fakeSigAlg2 signatureAlgorithm = 0xff01
+)
 
 func addSignatureAlgorithmTests() {
 	// Not all ciphers involve a signature. Advertise a list which gives all
@@ -13026,7 +13013,6 @@ func addExportTrafficSecretsTests() {
 		{"AEAD-AES128-GCM-SHA256", TLS_AES_128_GCM_SHA256},
 		{"AEAD-AES256-GCM-SHA384", TLS_AES_256_GCM_SHA384},
 	} {
-
 		testCases = append(testCases, testCase{
 			name: "ExportTrafficSecrets-" + cipherSuite.name,
 			config: Config{
@@ -13894,19 +13880,6 @@ func addCurveTests() {
 		shimCertificate: &ecdsaP256Certificate,
 		shouldFail:      true,
 		expectedError:   ":WRONG_CURVE:",
-	})
-
-	// This behavior may, temporarily, be disabled with a flag.
-	testCases = append(testCases, testCase{
-		testType: serverTest,
-		name:     "NoCheckECDSACurve-TLS12",
-		config: Config{
-			MinVersion:       VersionTLS12,
-			MaxVersion:       VersionTLS12,
-			CurvePreferences: []CurveID{CurveP384},
-		},
-		shimCertificate: &ecdsaP256Certificate,
-		flags:           []string{"-no-check-ecdsa-curve"},
 	})
 
 	// If the ECDSA certificate is ineligible due to a curve mismatch, the
@@ -15276,6 +15249,11 @@ func addTrailingMessageDataTests() {
 			t.test.expectedLocalError = ""
 		}
 
+		if t.messageType == typeClientHello {
+			// We have a different error for ClientHello parsing.
+			t.test.expectedError = ":CLIENTHELLO_PARSE_FAILED:"
+		}
+
 		if t.messageType == typeFinished {
 			// Bad Finished messages read as the verify data having
 			// the wrong length.
@@ -15430,7 +15408,7 @@ func addTLS13HandshakeTests() {
 			},
 		},
 		shouldFail:         true,
-		expectedError:      ":DECODE_ERROR:",
+		expectedError:      ":CLIENTHELLO_PARSE_FAILED:",
 		expectedLocalError: "remote error: error decoding message",
 	})
 	testCases = append(testCases, testCase{
@@ -15443,7 +15421,7 @@ func addTLS13HandshakeTests() {
 			},
 		},
 		shouldFail:         true,
-		expectedError:      ":DECODE_ERROR:",
+		expectedError:      ":CLIENTHELLO_PARSE_FAILED:",
 		expectedLocalError: "remote error: error decoding message",
 	})
 
@@ -15870,8 +15848,9 @@ func addTLS13HandshakeTests() {
 				SecondHelloRetryRequest: true,
 			},
 		},
-		shouldFail:    true,
-		expectedError: ":UNEXPECTED_MESSAGE:",
+		shouldFail:         true,
+		expectedError:      ":UNEXPECTED_MESSAGE:",
+		expectedLocalError: "remote error: unexpected message",
 	})
 
 	testCases = append(testCases, testCase{
@@ -17009,6 +16988,41 @@ func addTLS13HandshakeTests() {
 			peerCertificate: &rsaCertificate,
 		},
 		shimCertificate:    &rsaCertificate,
+		shouldFail:         true,
+		expectedError:      ":UNEXPECTED_MESSAGE:",
+		expectedLocalError: "remote error: unexpected message",
+	})
+
+	// PSK/resumption handshakes should not accept CertificateRequest or
+	// Certificate messages.
+	testCases = append(testCases, testCase{
+		testType: clientTest,
+		name:     "CertificateInResumption-TLS13",
+		config: Config{
+			MinVersion: VersionTLS13,
+			MaxVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				AlwaysSendCertificate: true,
+			},
+		},
+		resumeSession:      true,
+		shouldFail:         true,
+		expectedError:      ":UNEXPECTED_MESSAGE:",
+		expectedLocalError: "remote error: unexpected message",
+	})
+	testCases = append(testCases, testCase{
+		testType: clientTest,
+		name:     "CertificateRequestInResumption-TLS13",
+		config: Config{
+			MinVersion: VersionTLS13,
+			MaxVersion: VersionTLS13,
+			ClientAuth: RequireAnyClientCert,
+			Bugs: ProtocolBugs{
+				AlwaysSendCertificateRequest: true,
+			},
+		},
+		shimCertificate:    &rsaCertificate,
+		resumeSession:      true,
 		shouldFail:         true,
 		expectedError:      ":UNEXPECTED_MESSAGE:",
 		expectedLocalError: "remote error: unexpected message",
@@ -18252,7 +18266,7 @@ func addJDK11WorkaroundTests() {
 		flags: []string{"-max-version", strconv.Itoa(VersionTLS12)},
 	})
 
-	var clientHelloTests = []struct {
+	clientHelloTests := []struct {
 		clientHello []byte
 		isJDK11     bool
 	}{
@@ -18391,6 +18405,10 @@ func addDelegatedCredentialTests() {
 	p256DC := createDelegatedCredential(&rsaCertificate, delegatedCredentialConfig{
 		dcAlgo: signatureECDSAWithP256AndSHA256,
 		algo:   signatureRSAPSSWithSHA256,
+	})
+	p256DCFromECDSA := createDelegatedCredential(&ecdsaP256Certificate, delegatedCredentialConfig{
+		dcAlgo: signatureECDSAWithP256AndSHA256,
+		algo:   signatureECDSAWithP256AndSHA256,
 	})
 
 	testCases = append(testCases, testCase{
@@ -18545,6 +18563,25 @@ func addDelegatedCredentialTests() {
 			peerCertificate: p384DC,
 		},
 	})
+
+	// Delegated credentials participate in issuer-based certificate selection.
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "DelegatedCredentials-MatchIssuer",
+		config: Config{
+			DelegatedCredentialAlgorithms: []signatureAlgorithm{signatureECDSAWithP256AndSHA256},
+			// The client requested p256DCFromECDSA's issuer.
+			RootCAs:     makeCertPoolFromRoots(p256DCFromECDSA),
+			SendRootCAs: true,
+		},
+		shimCredentials: []*Credential{
+			p256DC.WithMustMatchIssuer(true), p256DCFromECDSA.WithMustMatchIssuer(true)},
+		flags: []string{"-expect-selected-credential", "1"},
+		expectations: connectionExpectations{
+			peerCertificate: p256DCFromECDSA,
+		},
+	})
+
 }
 
 type echCipher struct {
@@ -18560,7 +18597,8 @@ var echCiphers = []echCipher{
 	{
 		name:   "HKDF-SHA256-AES-256-GCM",
 		cipher: HPKECipherSuite{KDF: hpke.HKDFSHA256, AEAD: hpke.AES256GCM},
-	}, {
+	},
+	{
 		name:   "HKDF-SHA256-ChaCha20-Poly1305",
 		cipher: HPKECipherSuite{KDF: hpke.HKDFSHA256, AEAD: hpke.ChaCha20Poly1305},
 	},
@@ -18754,7 +18792,8 @@ func addEncryptedClientHelloTests() {
 				flags: []string{
 					"-ech-server-config", base64FlagValue(echConfig.ECHConfig.Raw),
 					"-ech-server-key", base64FlagValue(echConfig.Key),
-					"-ech-is-retry-config", "1"},
+					"-ech-is-retry-config", "1",
+				},
 				shouldFail:         true,
 				expectedLocalError: "remote error: illegal parameter",
 				expectedError:      ":INVALID_CLIENT_HELLO_INNER:",
@@ -21704,6 +21743,11 @@ func addCompliancePolicyTests() {
 	}
 }
 
+func canBeShimCertificate(c *Credential) bool {
+	// Some options can only be set with the credentials API.
+	return c.Type == CredentialTypeX509 && !c.MustMatchIssuer
+}
+
 func addCertificateSelectionTests() {
 	// Combinatorially test each selection criteria at different versions,
 	// protocols, and with the matching certificate before and after the
@@ -22102,6 +22146,52 @@ func addCertificateSelectionTests() {
 			mismatch:      rsaCertificate.WithSignatureAlgorithms(signatureRSAPSSWithSHA384),
 			expectedError: ":NO_COMMON_SIGNATURE_ALGORITHMS:",
 		},
+
+		// By default, certificate selection does not take issuers
+		// into account.
+		{
+			name:     "Client-DontCheckIssuer",
+			testType: clientTest,
+			config: Config{
+				ClientAuth: RequestClientCert,
+				ClientCAs:  makeCertPoolFromRoots(&rsaChainCertificate, &ecdsaP384Certificate),
+			},
+			match: &ecdsaP256Certificate,
+		},
+		{
+			name:     "Server-DontCheckIssuer",
+			testType: serverTest,
+			config: Config{
+				RootCAs:     makeCertPoolFromRoots(&rsaChainCertificate, &ecdsaP384Certificate),
+				SendRootCAs: true,
+			},
+			match: &ecdsaP256Certificate,
+		},
+
+		// If requested, certificate selection will match against the
+		// requested issuers.
+		{
+			name:     "Client-CheckIssuer",
+			testType: clientTest,
+			config: Config{
+				ClientAuth: RequestClientCert,
+				ClientCAs:  makeCertPoolFromRoots(&rsaChainCertificate, &ecdsaP384Certificate),
+			},
+			match:         rsaChainCertificate.WithMustMatchIssuer(true),
+			mismatch:      ecdsaP256Certificate.WithMustMatchIssuer(true),
+			expectedError: ":NO_MATCHING_ISSUER:",
+		},
+		{
+			name:     "Server-CheckIssuer",
+			testType: serverTest,
+			config: Config{
+				RootCAs:     makeCertPoolFromRoots(&rsaChainCertificate, &ecdsaP384Certificate),
+				SendRootCAs: true,
+			},
+			match:         rsaChainCertificate.WithMustMatchIssuer(true),
+			mismatch:      ecdsaP256Certificate.WithMustMatchIssuer(true),
+			expectedError: ":NO_MATCHING_ISSUER:",
+		},
 	}
 
 	for _, protocol := range []protocol{tls, dtls} {
@@ -22243,16 +22333,18 @@ func addCertificateSelectionTests() {
 					flags:           append([]string{"-expect-selected-credential", "1"}, test.flags...),
 					expectations:    connectionExpectations{peerCertificate: test.match},
 				})
-				testCases = append(testCases, testCase{
-					name:            fmt.Sprintf("CertificateSelection-%s-MatchDefault-%s", test.name, suffix),
-					protocol:        protocol,
-					testType:        test.testType,
-					config:          config,
-					shimCredentials: []*Credential{test.mismatch},
-					shimCertificate: test.match,
-					flags:           append([]string{"-expect-selected-credential", "-1"}, test.flags...),
-					expectations:    connectionExpectations{peerCertificate: test.match},
-				})
+				if canBeShimCertificate(test.match) {
+					testCases = append(testCases, testCase{
+						name:            fmt.Sprintf("CertificateSelection-%s-MatchDefault-%s", test.name, suffix),
+						protocol:        protocol,
+						testType:        test.testType,
+						config:          config,
+						shimCredentials: []*Credential{test.mismatch},
+						shimCertificate: test.match,
+						flags:           append([]string{"-expect-selected-credential", "-1"}, test.flags...),
+						expectations:    connectionExpectations{peerCertificate: test.match},
+					})
+				}
 				testCases = append(testCases, testCase{
 					name:               fmt.Sprintf("CertificateSelection-%s-MatchNone-%s", test.name, suffix),
 					protocol:           protocol,
@@ -22849,6 +22941,502 @@ func addKeyUpdateTests() {
 	})
 }
 
+func addPAKETests() {
+	spakeCredential := Credential{
+		Type:         CredentialTypeSPAKE2PlusV1,
+		PAKEContext:  []byte("context"),
+		PAKEClientID: []byte("client"),
+		PAKEServerID: []byte("server"),
+		PAKEPassword: []byte("password"),
+	}
+
+	spakeWrongClientID := spakeCredential
+	spakeWrongClientID.PAKEClientID = []byte("wrong")
+
+	spakeWrongServerID := spakeCredential
+	spakeWrongServerID.PAKEServerID = []byte("wrong")
+
+	spakeWrongPassword := spakeCredential
+	spakeWrongPassword.PAKEPassword = []byte("wrong")
+
+	spakeWrongRole := spakeCredential
+	spakeWrongRole.WrongPAKERole = true
+
+	spakeWrongCodepoint := spakeCredential
+	spakeWrongCodepoint.OverridePAKECodepoint = 1234
+
+	testCases = append(testCases, testCase{
+		name:     "PAKE-No-Server-Support",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+		},
+		shouldFail:    true,
+		expectedError: ":MISSING_KEY_SHARE:",
+	})
+	testCases = append(testCases, testCase{
+		name:     "PAKE-Server",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				// We do not currently support resumption with PAKE, so PAKE
+				// servers should not issue session tickets.
+				ExpectNoNewSessionTicket: true,
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+	})
+	testCases = append(testCases, testCase{
+		// Send a ClientHello with the wrong PAKE client ID.
+		name:     "PAKE-Server-WrongClientID",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeWrongClientID,
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":PEER_PAKE_MISMATCH:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+	testCases = append(testCases, testCase{
+		// Send a ClientHello with the wrong PAKE server ID.
+		name:     "PAKE-Server-WrongServerID",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeWrongServerID,
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":PEER_PAKE_MISMATCH:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+	testCases = append(testCases, testCase{
+		// Send a ClientHello with the wrong PAKE codepoint.
+		name:     "PAKE-Server-WrongCodepoint",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeWrongCodepoint,
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":PEER_PAKE_MISMATCH:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+	testCases = append(testCases, testCase{
+		// A server configured with a mix of PAKE and non-PAKE
+		// credentials will select the first that matches what the
+		// client offered. In doing so, it should skip unsupported
+		// PAKE algorithms.
+		name:     "PAKE-Server-MultiplePAKEs",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				OfferExtraPAKEs: []uint16{1, 2, 3, 4, 5},
+			},
+		},
+		shimCredentials: []*Credential{&spakeWrongClientID, &spakeWrongServerID, &spakeWrongRole, &spakeCredential, &rsaCertificate},
+		flags:           []string{"-expect-selected-credential", "3"},
+	})
+	testCases = append(testCases, testCase{
+		// A server configured with a certificate credential before a
+		// PAKE credential will consider the certificate credential first.
+		name:     "PAKE-Server-CertificateBeforePAKE",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				// Pretend to offer a matching PAKE share, but expect the
+				// shim to select the credential first and negotiate a
+				// normal handshake.
+				OfferExtraPAKEClientID: spakeCredential.PAKEClientID,
+				OfferExtraPAKEServerID: spakeCredential.PAKEServerID,
+				OfferExtraPAKEs:        []uint16{spakeID},
+			},
+		},
+		shimCredentials: []*Credential{&rsaCertificate, &spakeCredential},
+		flags:           []string{"-expect-selected-credential", "0"},
+	})
+	testCases = append(testCases, testCase{
+		// A server configured with just a PAKE credential should reject normal
+		// clients.
+		name:     "PAKE-Server-NormalClient",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":PEER_PAKE_MISMATCH:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+	testCases = append(testCases, testCase{
+		// ... and TLS 1.2 clients.
+		name:     "PAKE-Server-NormalTLS12Client",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS12,
+			MaxVersion: VersionTLS12,
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":NO_SHARED_CIPHER:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+	testCases = append(testCases, testCase{
+		// ... but you can configure a server with both PAKE and certificate-based
+		// SSL_CREDENTIALs and that works.
+		name:     "PAKE-ServerWithCertsToo-NormalClient",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+		},
+		shimCredentials: []*Credential{&spakeCredential, &rsaCertificate},
+		flags:           []string{"-expect-selected-credential", "1"},
+	})
+	testCases = append(testCases, testCase{
+		// ... and for older clients.
+		name:     "PAKE-ServerWithCertsToo-NormalTLS12Client",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS12,
+			MaxVersion: VersionTLS12,
+		},
+		shimCredentials: []*Credential{&spakeCredential, &rsaCertificate},
+		flags:           []string{"-expect-selected-credential", "1"},
+	})
+	testCases = append(testCases, testCase{
+		name:     "PAKE-Client",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				CheckClientHello: func(c *clientHelloMsg) error {
+					// PAKE connections don't use the key_share / supported_groups mechanism.
+					if c.hasKeyShares {
+						return errors.New("unexpected key_share extension")
+					}
+					if len(c.supportedCurves) != 0 {
+						return errors.New("unexpected supported_groups extension")
+					}
+					// PAKE connections don't use signature algorithms.
+					if len(c.signatureAlgorithms) != 0 {
+						return errors.New("unexpected signature_algorithms extension")
+					}
+					// We don't support resumption with PAKEs.
+					if len(c.pskKEModes) != 0 {
+						return errors.New("unexpected psk_key_exchange_modes extension")
+					}
+					return nil
+				},
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+	})
+	testCases = append(testCases, testCase{
+		// Although there is no reason to request new key shares, the PAKE
+		// client should handle cookie requests.
+		name:     "PAKE-Client-HRRCookie",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				SendHelloRetryRequestCookie: []byte("cookie"),
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+	})
+	testCases = append(testCases, testCase{
+		// A PAKE client will not offer key shares, so the client should
+		// reject a HelloRetryRequest requesting a different key share.
+		name:     "PAKE-Client-HRRKeyShare",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				SendHelloRetryRequestCurve: CurveX25519,
+			},
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":UNEXPECTED_EXTENSION:",
+		expectedLocalError: "remote error: unsupported extension",
+	})
+	testCases = append(testCases, testCase{
+		// A server cannot reply with an HRR asking for a PAKE if the client didn't
+		// offer a PAKE in the ClientHello.
+		name:     "PAKE-NormalClient-PAKEInHRR",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				AlwaysSendHelloRetryRequest: true,
+				SendPAKEInHelloRetryRequest: true,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":UNEXPECTED_EXTENSION:",
+	})
+	testCases = append(testCases, testCase{
+		// A PAKE client should not accept an empty ServerHello.
+		name:     "PAKE-Client-EmptyServerHello",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				// Trigger an empty ServerHello by making a normal server skip
+				// the key_share extension.
+				MissingKeyShare: true,
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+		shouldFail:      true,
+		expectedError:   ":MISSING_EXTENSION:",
+	})
+	testCases = append(testCases, testCase{
+		// A PAKE client should not accept a key_share ServerHello.
+		name:     "PAKE-Client-KeyShareServerHello",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				// Trigger a key_share ServerHello by making a normal server
+				// skip the HelloRetryRequest it would otherwise send in
+				// response to the shim's key_share-less ClientHello.
+				SkipHelloRetryRequest: true,
+				// Ignore the client's lack of supported_groups.
+				IgnorePeerCurvePreferences: true,
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+		shouldFail:      true,
+		expectedError:   ":UNEXPECTED_EXTENSION:",
+	})
+	testCases = append(testCases, testCase{
+		// A PAKE client should not accept a TLS 1.2 ServerHello.
+		name:     "PAKE-Client-TLS12ServerHello",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS12,
+			MaxVersion: VersionTLS12,
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+		shouldFail:      true,
+		expectedError:   ":UNSUPPORTED_PROTOCOL:",
+	})
+	testCases = append(testCases, testCase{
+		// A server cannot send the PAKE extension to a non-PAKE client.
+		name:     "PAKE-NormalClient-UnsolicitedPAKEInServerHello",
+		testType: clientTest,
+		config: Config{
+			Bugs: ProtocolBugs{
+				UnsolicitedPAKE: spakeID,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":UNEXPECTED_EXTENSION:",
+	})
+	testCases = append(testCases, testCase{
+		// A server cannot reply with a PAKE that the client did not offer.
+		name:     "PAKE-Client-WrongPAKEInServerHello",
+		testType: clientTest,
+		config: Config{
+			Bugs: ProtocolBugs{
+				UnsolicitedPAKE: 1234,
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+		shouldFail:      true,
+		expectedError:   ":DECODE_ERROR:",
+	})
+	testCases = append(testCases, testCase{
+		name:     "PAKE-Extension-Duplicate",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Bugs: ProtocolBugs{
+				OfferExtraPAKEClientID: []byte("client"),
+				OfferExtraPAKEServerID: []byte("server"),
+				OfferExtraPAKEs:        []uint16{1234, 1234},
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":ERROR_PARSING_EXTENSION:",
+	})
+	testCases = append(testCases, testCase{
+		// If the client sees a server with a wrong password, it should
+		// reject the confirmV value in the ServerHello.
+		name:     "PAKE-Client-WrongPassword",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeWrongPassword,
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+		shouldFail:      true,
+		expectedError:   ":DECODE_ERROR:",
+	})
+	testCases = append(testCases, testCase{
+		name:     "PAKE-Client-Truncate",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				TruncatePAKEMessage: true,
+			},
+		},
+		shimCredentials: []*Credential{&spakeCredential},
+		shouldFail:      true,
+		expectedError:   ":DECODE_ERROR:",
+	})
+	testCases = append(testCases, testCase{
+		name:     "PAKE-Server-Truncate",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				TruncatePAKEMessage: true,
+			},
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":DECODE_ERROR:",
+		expectedLocalError: "remote error: illegal parameter",
+	})
+	testCases = append(testCases, testCase{
+		// Servers may not send CertificateRequest in a PAKE handshake.
+		name:     "PAKE-Client-UnexpectedCertificateRequest",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			ClientAuth: RequireAnyClientCert,
+			Bugs: ProtocolBugs{
+				AlwaysSendCertificateRequest: true,
+			},
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":UNEXPECTED_MESSAGE:",
+		expectedLocalError: "remote error: unexpected message",
+	})
+	testCases = append(testCases, testCase{
+		// Servers may not send Certificate in a PAKE handshake.
+		name:     "PAKE-Client-UnexpectedCertificate",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				AlwaysSendCertificate:    true,
+				UseCertificateCredential: &rsaCertificate,
+				// Ignore the client's lack of signature_algorithms.
+				IgnorePeerSignatureAlgorithmPreferences: true,
+			},
+		},
+		shimCredentials:    []*Credential{&spakeCredential},
+		shouldFail:         true,
+		expectedError:      ":UNEXPECTED_MESSAGE:",
+		expectedLocalError: "remote error: unexpected message",
+	})
+	testCases = append(testCases, testCase{
+		// If a server is configured to request client certificates, it should
+		// still not do so when negotiating a PAKE.
+		name:     "PAKE-Server-DoNotRequestClientCertificate",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+		},
+		shimCredentials: []*Credential{&spakeCredential, &rsaCertificate},
+		flags:           []string{"-require-any-client-certificate"},
+	})
+	testCases = append(testCases, testCase{
+		// Clients should ignore server PAKE credentials.
+		name:     "PAKE-Client-WrongRole",
+		testType: clientTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+		},
+		shimCredentials: []*Credential{&spakeWrongRole},
+		shouldFail:      true,
+		// The shim will send a non-PAKE ClientHello.
+		expectedLocalError: "tls: client not configured with PAKE",
+	})
+	testCases = append(testCases, testCase{
+		// Servers should ignore client PAKE credentials.
+		name:     "PAKE-Server-WrongRole",
+		testType: serverTest,
+		config: Config{
+			MinVersion: VersionTLS13,
+			Credential: &spakeCredential,
+		},
+		shimCredentials: []*Credential{&spakeWrongRole},
+		shouldFail:      true,
+		// The shim will fail the handshake because it has no usable credentials
+		// available.
+		expectedError:      ":UNKNOWN_CERTIFICATE_TYPE:",
+		expectedLocalError: "remote error: handshake failure",
+	})
+	testCases = append(testCases, testCase{
+		// On the client, we only support a single PAKE credential.
+		name:            "PAKE-Client-MultiplePAKEs",
+		testType:        clientTest,
+		shimCredentials: []*Credential{&spakeCredential, &spakeWrongPassword},
+		shouldFail:      true,
+		expectedError:   ":UNSUPPORTED_CREDENTIAL_LIST:",
+	})
+	testCases = append(testCases, testCase{
+		// On the client, we only support a single PAKE credential.
+		name:            "PAKE-Client-PAKEAndCertificate",
+		testType:        clientTest,
+		shimCredentials: []*Credential{&spakeCredential, &rsaCertificate},
+		shouldFail:      true,
+		expectedError:   ":UNSUPPORTED_CREDENTIAL_LIST:",
+	})
+	testCases = append(testCases, testCase{
+		// We currently do not support resumption with PAKE. Even if configured
+		// with a session, the client should not offer the session with PAKEs.
+		name:     "PAKE-Client-NoResume",
+		testType: clientTest,
+		// Make two connections. For the first connection, just establish a
+		// session without PAKE, to pick up a session.
+		config: Config{
+			Credential: &rsaCertificate,
+		},
+		// For the second connection, use SPAKE.
+		resumeSession: true,
+		resumeConfig: &Config{
+			Credential: &spakeCredential,
+			Bugs: ProtocolBugs{
+				// Check that the ClientHello does not offer a session, even
+				// though one was configured.
+				ExpectNoTLS13PSK: true,
+				// Respond with an unsolicted PSK extension in ServerHello, to
+				// check that the client rejects it.
+				AlwaysSelectPSKIdentity: true,
+			},
+		},
+		resumeShimCredentials: []*Credential{&spakeCredential},
+		shouldFail:            true,
+		expectedError:         ":UNEXPECTED_EXTENSION:",
+	})
+}
+
 func worker(dispatcher *shimDispatcher, statusChan chan statusMsg, c chan *testCase, shimPath string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -23101,6 +23689,7 @@ func main() {
 	addCompliancePolicyTests()
 	addCertificateSelectionTests()
 	addKeyUpdateTests()
+	addPAKETests()
 
 	toAppend, err := convertToSplitHandshakeTests(testCases)
 	if err != nil {

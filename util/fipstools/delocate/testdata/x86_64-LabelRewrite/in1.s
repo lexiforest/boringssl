@@ -24,9 +24,6 @@ bar:
 	notrack jmp foo@PLT
 	jbe foo@PLT
 
-	# Synthesized symbols are treated as local ones.
-	call OPENSSL_ia32cap_get@PLT
-
 	# References to local labels are left as-is in the first file.
 .Llocal_label:
 	jbe .Llocal_label

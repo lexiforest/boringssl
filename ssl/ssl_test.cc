@@ -1,16 +1,16 @@
-/* Copyright 2014 The BoringSSL Authors
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
+// Copyright 2014 The BoringSSL Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <limits.h>
 #include <stdio.h>
@@ -2189,13 +2189,14 @@ static bool GetECHLength(SSL_CTX *ctx, size_t *out_client_hello_len,
   std::vector<uint8_t> client_hello;
   SSL_CLIENT_HELLO parsed;
   const uint8_t *unused;
-  if (!GetClientHello(ssl.get(), &client_hello) ||
-      !ssl_client_hello_init(
-          ssl.get(), &parsed,
-          // Skip record and handshake headers. This assumes the ClientHello
-          // fits in one record.
-          Span(client_hello)
-              .subspan(SSL3_RT_HEADER_LENGTH + SSL3_HM_HEADER_LENGTH)) ||
+  if (!GetClientHello(ssl.get(), &client_hello)) {
+    return false;
+  }
+  // Skip record and handshake headers. This assumes the ClientHello
+  // fits in one record.
+  auto body =
+      Span(client_hello).subspan(SSL3_RT_HEADER_LENGTH + SSL3_HM_HEADER_LENGTH);
+  if (!SSL_parse_client_hello(ssl.get(), &parsed, body.data(), body.size()) ||
       !SSL_early_callback_ctx_extension_get(
           &parsed, TLSEXT_TYPE_encrypted_client_hello, &unused, out_ech_len)) {
     return false;
@@ -3780,7 +3781,6 @@ TEST_P(SSLVersionTest, DefaultTicketKeyRotation) {
                                      true /* changed */));
 
   // Verify ticket resumption actually works.
-  bssl::UniquePtr<SSL> client, server;
   bssl::UniquePtr<SSL_SESSION> session =
       CreateClientSession(client_ctx_.get(), server_ctx_.get());
   ASSERT_TRUE(session);
@@ -4180,7 +4180,23 @@ TEST_P(SSLVersionTest, AutoChain) {
 
   EXPECT_TRUE(ChainsEqual(SSL_get_peer_full_cert_chain(client_.get()),
                           {cert_.get(), cert_.get()}));
+  EXPECT_TRUE(ChainsEqual(SSL_get_peer_full_cert_chain(server_.get()),
+                          {cert_.get(), cert_.get()}));
 
+  // Auto-chaining does not override explicitly-configured intermediates that
+  // are configured as late as cert_cb. If this fails, something in the
+  // handshake is likely auto-chaining too early.
+  SSL_CTX_clear_chain_certs(client_ctx_.get());
+  SSL_CTX_clear_chain_certs(server_ctx_.get());
+  auto install_intermediate = [](SSL *ssl, void *arg) -> int {
+    return SSL_add1_chain_cert(ssl, static_cast<X509 *>(arg));
+  };
+  SSL_CTX_set_cert_cb(client_ctx_.get(), install_intermediate, cert_.get());
+  SSL_CTX_set_cert_cb(server_ctx_.get(), install_intermediate, cert_.get());
+  ASSERT_TRUE(Connect());
+
+  EXPECT_TRUE(ChainsEqual(SSL_get_peer_full_cert_chain(client_.get()),
+                          {cert_.get(), cert_.get()}));
   EXPECT_TRUE(ChainsEqual(SSL_get_peer_full_cert_chain(server_.get()),
                           {cert_.get(), cert_.get()}));
 }
@@ -4860,8 +4876,8 @@ TEST(SSLTest, CredentialChains) {
 
   ASSERT_TRUE(SSL_CREDENTIAL_set1_private_key(cred.get(), key.get()));
   ASSERT_TRUE(SSL_CREDENTIAL_set1_private_key(cred2.get(), testkey.get()));
-  SSL_CREDENTIAL_set_must_match_issuer(cred.get());
-  SSL_CREDENTIAL_set_must_match_issuer(cred2.get());
+  SSL_CREDENTIAL_set_must_match_issuer(cred.get(), 1);
+  SSL_CREDENTIAL_set_must_match_issuer(cred2.get(), 1);
   ASSERT_TRUE(SSL_CTX_add1_credential(ctx.get(), cred.get()));
   ASSERT_TRUE(SSL_CTX_add1_credential(ctx.get(), cred2.get()));
 
@@ -9856,6 +9872,460 @@ TEST(SSLTest, SetGetCompliancePolicy) {
     EXPECT_EQ(SSL_get_compliance_policy(ssl.get()), policy);
   }
 }
+
+TEST(SSLTest, ParseClientHello) {
+  for (bool dtls : {false, true}) {
+    SCOPED_TRACE(dtls);
+    bssl::UniquePtr<SSL_CTX> ctx(
+        SSL_CTX_new(dtls ? DTLS_method() : TLS_method()));
+    ASSERT_TRUE(ctx);
+    bssl::UniquePtr<SSL> ssl(SSL_new(ctx.get()));
+    ASSERT_TRUE(ssl);
+
+    // From draft-ietf-tls-tls13-vectors-06, Section 7, annotated.
+    static const uint8_t kClientHelloTLS[] = {
+        // legacy_version
+        0x03, 0x03,
+        // random
+        0x37, 0xb0, 0x76, 0xd2, 0xfa, 0x50, 0x94, 0x39, 0x5e, 0x99, 0x71, 0xd7,
+        0x53, 0xc3, 0xc4, 0xcf, 0x07, 0x56, 0xb9, 0x40, 0x70, 0x13, 0xcb, 0xca,
+        0xc7, 0xf4, 0x4a, 0xc3, 0x28, 0x13, 0xf6, 0x0f,
+        // legacy_session_id
+        0x20, 0x91, 0x41, 0xb7, 0x89, 0x83, 0xd3, 0x67, 0xa0, 0xfe, 0x97, 0x08,
+        0xdf, 0x32, 0xf5, 0xb9, 0x88, 0x8f, 0xe5, 0x9e, 0xde, 0x4e, 0x61, 0x2c,
+        0xf6, 0xbd, 0xb1, 0xfb, 0xbe, 0xe6, 0xf9, 0xef, 0xfe,
+        // cipher_suites
+        0x00, 0x06, 0x13, 0x01, 0x13, 0x03, 0x13, 0x02,
+        // legacy_compression_methods
+        0x01, 0x00,
+        // extensions
+        0x00, 0x8d,
+        // server_name
+        0x00, 0x00, 0x00, 0x0b, 0x00, 0x09, 0x00, 0x00, 0x06, 0x73, 0x65, 0x72,
+        0x76, 0x65, 0x72,
+        // renegotiation_info
+        0xff, 0x01, 0x00, 0x01, 0x00,
+        // supported_groups
+        0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18,
+        0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04,
+        // key_share
+        0x00, 0x33, 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0xd5, 0x15,
+        0x42, 0x62, 0x5f, 0x25, 0xa9, 0x2d, 0x44, 0xa3, 0xaa, 0xde, 0xf5, 0x9c,
+        0xa8, 0x49, 0xad, 0x2f, 0x8e, 0xfa, 0x9f, 0x04, 0xb8, 0xf5, 0xda, 0xb4,
+        0x02, 0xac, 0xbc, 0x57, 0x1f, 0x16,
+        // supported_versions
+        0x00, 0x2b, 0x00, 0x03, 0x02, 0x03, 0x04,
+        // signature_algorithms
+        0x00, 0x0d, 0x00, 0x20, 0x00, 0x1e, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03,
+        0x02, 0x03, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01,
+        0x06, 0x01, 0x02, 0x01, 0x04, 0x02, 0x05, 0x02, 0x06, 0x02, 0x02, 0x02,
+        // psk_key_exchange_modes
+        0x00, 0x2d, 0x00, 0x02, 0x01, 0x01,
+        // record_size_limit
+        0x00, 0x1c, 0x00, 0x02, 0x40, 0x01};
+    // The above, modified for DTLS 1.3. (Versions switched to DTLS spelling, a
+    // cookie added.)
+    static const uint8_t kClientHelloDTLS[] = {
+        // legacy_version
+        0xfe, 0xfd,
+        // random
+        0x37, 0xb0, 0x76, 0xd2, 0xfa, 0x50, 0x94, 0x39, 0x5e, 0x99, 0x71, 0xd7,
+        0x53, 0xc3, 0xc4, 0xcf, 0x07, 0x56, 0xb9, 0x40, 0x70, 0x13, 0xcb, 0xca,
+        0xc7, 0xf4, 0x4a, 0xc3, 0x28, 0x13, 0xf6, 0x0f,
+        // legacy_session_id
+        0x20, 0x91, 0x41, 0xb7, 0x89, 0x83, 0xd3, 0x67, 0xa0, 0xfe, 0x97, 0x08,
+        0xdf, 0x32, 0xf5, 0xb9, 0x88, 0x8f, 0xe5, 0x9e, 0xde, 0x4e, 0x61, 0x2c,
+        0xf6, 0xbd, 0xb1, 0xfb, 0xbe, 0xe6, 0xf9, 0xef, 0xfe,
+        // legacy_cookie
+        0x04, 0x01, 0x02, 0x03, 0x04,
+        // cipher_suites
+        0x00, 0x06, 0x13, 0x01, 0x13, 0x03, 0x13, 0x02,
+        // legacy_compression_methods
+        0x01, 0x00,
+        // extensions
+        0x00, 0x8d,
+        // server_name
+        0x00, 0x00, 0x00, 0x0b, 0x00, 0x09, 0x00, 0x00, 0x06, 0x73, 0x65, 0x72,
+        0x76, 0x65, 0x72,
+        // renegotiation_info
+        0xff, 0x01, 0x00, 0x01, 0x00,
+        // supported_groups
+        0x00, 0x0a, 0x00, 0x14, 0x00, 0x12, 0x00, 0x1d, 0x00, 0x17, 0x00, 0x18,
+        0x00, 0x19, 0x01, 0x00, 0x01, 0x01, 0x01, 0x02, 0x01, 0x03, 0x01, 0x04,
+        // key_share
+        0x00, 0x33, 0x00, 0x26, 0x00, 0x24, 0x00, 0x1d, 0x00, 0x20, 0xd5, 0x15,
+        0x42, 0x62, 0x5f, 0x25, 0xa9, 0x2d, 0x44, 0xa3, 0xaa, 0xde, 0xf5, 0x9c,
+        0xa8, 0x49, 0xad, 0x2f, 0x8e, 0xfa, 0x9f, 0x04, 0xb8, 0xf5, 0xda, 0xb4,
+        0x02, 0xac, 0xbc, 0x57, 0x1f, 0x16,
+        // supported_versions
+        0x00, 0x2b, 0x00, 0x03, 0x02, 0xfe, 0xfc,
+        // signature_algorithms
+        0x00, 0x0d, 0x00, 0x20, 0x00, 0x1e, 0x04, 0x03, 0x05, 0x03, 0x06, 0x03,
+        0x02, 0x03, 0x08, 0x04, 0x08, 0x05, 0x08, 0x06, 0x04, 0x01, 0x05, 0x01,
+        0x06, 0x01, 0x02, 0x01, 0x04, 0x02, 0x05, 0x02, 0x06, 0x02, 0x02, 0x02,
+        // psk_key_exchange_modes
+        0x00, 0x2d, 0x00, 0x02, 0x01, 0x01,
+        // record_size_limit
+        0x00, 0x1c, 0x00, 0x02, 0x40, 0x01};
+
+    auto in = dtls ? Span(kClientHelloDTLS) : Span(kClientHelloTLS);
+    SSL_CLIENT_HELLO client_hello;
+    ASSERT_TRUE(
+        SSL_parse_client_hello(ssl.get(), &client_hello, in.data(), in.size()));
+    EXPECT_EQ(client_hello.ssl, ssl.get());
+    EXPECT_EQ(Bytes(client_hello.client_hello, client_hello.client_hello_len),
+              Bytes(in));
+    EXPECT_EQ(client_hello.version, dtls ? DTLS1_2_VERSION : TLS1_2_VERSION);
+    static const uint8_t kRandom[] = {
+        0x37, 0xb0, 0x76, 0xd2, 0xfa, 0x50, 0x94, 0x39, 0x5e, 0x99, 0x71,
+        0xd7, 0x53, 0xc3, 0xc4, 0xcf, 0x07, 0x56, 0xb9, 0x40, 0x70, 0x13,
+        0xcb, 0xca, 0xc7, 0xf4, 0x4a, 0xc3, 0x28, 0x13, 0xf6, 0x0f};
+    EXPECT_EQ(Bytes(client_hello.random, client_hello.random_len),
+              Bytes(kRandom));
+    static const uint8_t kSessionID[] = {
+        0x91, 0x41, 0xb7, 0x89, 0x83, 0xd3, 0x67, 0xa0, 0xfe, 0x97, 0x08,
+        0xdf, 0x32, 0xf5, 0xb9, 0x88, 0x8f, 0xe5, 0x9e, 0xde, 0x4e, 0x61,
+        0x2c, 0xf6, 0xbd, 0xb1, 0xfb, 0xbe, 0xe6, 0xf9, 0xef, 0xfe};
+    EXPECT_EQ(Bytes(client_hello.session_id, client_hello.session_id_len),
+              Bytes(kSessionID));
+    if (dtls) {
+      static const uint8_t kCookie[] = {0x01, 0x02, 0x03, 0x04};
+      EXPECT_EQ(Bytes(client_hello.dtls_cookie, client_hello.dtls_cookie_len),
+                Bytes(kCookie));
+    } else {
+      EXPECT_EQ(client_hello.dtls_cookie, nullptr);
+      EXPECT_EQ(client_hello.dtls_cookie_len, 0u);
+    }
+    static const uint8_t kCipherSuites[] = {0x13, 0x01, 0x13, 0x03, 0x13, 0x02};
+    EXPECT_EQ(Bytes(client_hello.cipher_suites, client_hello.cipher_suites_len),
+              Bytes(kCipherSuites));
+    static const uint8_t kCompressionMethods[] = {0x00};
+    EXPECT_EQ(Bytes(client_hello.compression_methods,
+                    client_hello.compression_methods_len),
+              Bytes(kCompressionMethods));
+    auto extensions = in.last(141);
+    EXPECT_EQ(Bytes(client_hello.extensions, client_hello.extensions_len),
+              Bytes(extensions));
+
+    static const uint8_t kServerName[] = {0x00, 0x09, 0x00, 0x00, 0x06, 0x73,
+                                          0x65, 0x72, 0x76, 0x65, 0x72};
+    const uint8_t *data;
+    size_t len;
+    ASSERT_TRUE(SSL_early_callback_ctx_extension_get(
+        &client_hello, TLSEXT_TYPE_server_name, &data, &len));
+    EXPECT_EQ(Bytes(data, len), Bytes(kServerName));
+    EXPECT_FALSE(SSL_early_callback_ctx_extension_get(
+        &client_hello, TLSEXT_TYPE_encrypted_client_hello, &data, &len));
+
+    // Trailing data should be rejected.
+    std::vector<uint8_t> trailing_data(in.begin(), in.end());
+    trailing_data.push_back(0);
+    EXPECT_FALSE(SSL_parse_client_hello(
+        ssl.get(), &client_hello, trailing_data.data(), trailing_data.size()));
+    EXPECT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL,
+                            SSL_R_CLIENTHELLO_PARSE_FAILED));
+    ERR_clear_error();
+
+    // Other invalid inputs.
+    static const uint8_t kInvalid[] = {'n', 'o', 'p', 'e'};
+    EXPECT_FALSE(SSL_parse_client_hello(ssl.get(), &client_hello, kInvalid,
+                                        sizeof(kInvalid)));
+    EXPECT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL,
+                            SSL_R_CLIENTHELLO_PARSE_FAILED));
+    ERR_clear_error();
+  }
+}
+
+class SSLPAKETest : public testing::Test {
+ public:
+  static Span<const uint8_t> pake_context() {
+    return StringAsBytes("test context");
+  }
+  static Span<const uint8_t> client_identity() {
+    return StringAsBytes("client");
+  }
+  static Span<const uint8_t> server_identity() {
+    return StringAsBytes("client");
+  }
+
+  static UniquePtr<SSL_CTX> NewClientContext(std::string_view password,
+                                             uint32_t attempts) {
+    auto reg = Register(password);
+    if (!reg) {
+      return nullptr;
+    }
+
+    UniquePtr<SSL_CREDENTIAL> cred(SSL_CREDENTIAL_new_spake2plusv1_client(
+        pake_context().data(), pake_context().size(), client_identity().data(),
+        client_identity().size(), server_identity().data(),
+        server_identity().size(), attempts, reg->pw_verifier_w0,
+        sizeof(reg->pw_verifier_w0), reg->pw_verifier_w1,
+        sizeof(reg->pw_verifier_w1)));
+    if (cred == nullptr) {
+      return nullptr;
+    }
+
+    bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(TLS_method()));
+    if (ctx == nullptr || !SSL_CTX_add1_credential(ctx.get(), cred.get())) {
+      return nullptr;
+    }
+    return ctx;
+  }
+
+  static UniquePtr<SSL_CTX> NewServerContext(std::string_view password,
+                                             uint32_t attempts) {
+    auto reg = Register(password);
+    if (!reg) {
+      return nullptr;
+    }
+
+    UniquePtr<SSL_CREDENTIAL> cred(SSL_CREDENTIAL_new_spake2plusv1_server(
+        pake_context().data(), pake_context().size(), client_identity().data(),
+        client_identity().size(), server_identity().data(),
+        server_identity().size(), attempts, reg->pw_verifier_w0,
+        sizeof(reg->pw_verifier_w0), reg->registration_record,
+        sizeof(reg->registration_record)));
+    if (cred == nullptr) {
+      return nullptr;
+    }
+
+    bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(TLS_method()));
+    if (ctx == nullptr || !SSL_CTX_add1_credential(ctx.get(), cred.get())) {
+      return nullptr;
+    }
+    return ctx;
+  }
+
+ private:
+  struct PAKERegistration {
+    uint8_t pw_verifier_w0[32];
+    uint8_t pw_verifier_w1[32];
+    uint8_t registration_record[65];
+  };
+
+  static std::optional<PAKERegistration> Register(std::string_view password) {
+    auto password_bytes = StringAsBytes(password);
+    PAKERegistration ret;
+    if (!SSL_spake2plusv1_register(
+            ret.pw_verifier_w0, ret.pw_verifier_w1, ret.registration_record,
+            password_bytes.data(), password_bytes.size(),
+            client_identity().data(), client_identity().size(),
+            server_identity().data(), server_identity().size())) {
+      return std::nullopt;
+    }
+    return ret;
+  }
+};
+
+TEST_F(SSLPAKETest, SPAKE2PLUS) {
+  UniquePtr<SSL_CTX> client_ctx = NewClientContext("password", 1);
+  ASSERT_TRUE(client_ctx);
+  UniquePtr<SSL_CTX> server_ctx = NewServerContext("password", 1);
+  ASSERT_TRUE(server_ctx);
+  bssl::UniquePtr<SSL> client, server;
+  ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx.get(),
+                                     server_ctx.get()));
+}
+
+TEST_F(SSLPAKETest, ClientLimit) {
+  static constexpr uint32_t kLimit = 5;
+  static constexpr uint32_t kUnlimited = UINT32_MAX;
+
+  UniquePtr<SSL_CTX> client_ctx = NewClientContext("password", kLimit);
+  ASSERT_TRUE(client_ctx);
+  UniquePtr<SSL_CTX> server_ctx_good = NewServerContext("password", kUnlimited);
+  ASSERT_TRUE(server_ctx_good);
+  UniquePtr<SSL_CTX> server_ctx_bad = NewServerContext("wrong", kUnlimited);
+  ASSERT_TRUE(server_ctx_bad);
+
+  // The client sees confirmV before revealing a password confirmation, so
+  // neither successful nor unfinished handshakes contribute to the limit.
+  bssl::UniquePtr<SSL> client, server;
+  for (uint32_t i = 0; i < kLimit * 2; i++) {
+    // Unfinished handshake.
+    ASSERT_TRUE(CreateClientAndServer(&client, &server, client_ctx.get(),
+                                      server_ctx_good.get()));
+    ASSERT_EQ(SSL_do_handshake(client.get()), -1);  // Write ClientHello.
+    ASSERT_EQ(SSL_get_error(client.get(), -1), SSL_ERROR_WANT_READ);
+
+    // Successful handshake.
+    ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx.get(),
+                                       server_ctx_good.get()));
+  }
+
+  // After kLimit - 1 password mismatches, the credential still functions.
+  for (uint32_t i = 0; i < kLimit - 1; i++) {
+    ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx.get(),
+                                        server_ctx_bad.get()));
+  }
+  ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx.get(),
+                                     server_ctx_good.get()));
+
+  // But after one more password mismatch...
+  ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx.get(),
+                                      server_ctx_bad.get()));
+
+  // ...the client should refuse to use the credential at all.
+  ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx.get(),
+                                      server_ctx_good.get()));
+  ASSERT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL, SSL_R_PAKE_EXHAUSTED));
+}
+
+TEST_F(SSLPAKETest, ServerLimit) {
+  static constexpr uint32_t kLimit = 5;
+  static constexpr uint32_t kUnlimited = UINT32_MAX;
+
+  UniquePtr<SSL_CTX> server_ctx = NewServerContext("password", kLimit);
+  ASSERT_TRUE(server_ctx);
+  UniquePtr<SSL_CTX> client_ctx_good = NewClientContext("password", kUnlimited);
+  ASSERT_TRUE(client_ctx_good);
+  UniquePtr<SSL_CTX> client_ctx_bad = NewClientContext("wrong", kUnlimited);
+  ASSERT_TRUE(client_ctx_bad);
+
+  // Successful handshakes do not (indefinitely) contribute to the limit. If the
+  // server sees one good handshake at a time, the limit does not impact it.
+  bssl::UniquePtr<SSL> client, server;
+  for (uint32_t i = 0; i < kLimit * 2; i++) {
+    ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                       server_ctx.get()));
+  }
+
+  // The server sends confirmV before confirming the client knew the password,
+  // so any handshake in between ClientHello and ServerHello counts towards the
+  // limit.
+  struct ClientServerPair {
+    bssl::UniquePtr<SSL> client, server;
+  };
+  std::vector<ClientServerPair> pending;
+  auto handshake_up_to_serverhello = [](ClientServerPair *pair) {
+    // Send ClientHello.
+    ASSERT_EQ(SSL_do_handshake(pair->client.get()), -1);
+    ASSERT_EQ(SSL_get_error(pair->client.get(), -1), SSL_ERROR_WANT_READ);
+    // Send ServerHello..Finished.
+    ASSERT_EQ(SSL_do_handshake(pair->server.get()), -1);
+    ASSERT_EQ(SSL_get_error(pair->server.get(), -1), SSL_ERROR_WANT_READ);
+  };
+
+  // First, go just under the limit.
+  for (uint32_t i = 0; i < kLimit - 1; i++) {
+    ClientServerPair pair;
+    ASSERT_TRUE(CreateClientAndServer(&pair.client, &pair.server,
+                                      client_ctx_good.get(), server_ctx.get()));
+    ASSERT_NO_FATAL_FAILURE(handshake_up_to_serverhello(&pair));
+    pending.push_back(std::move(pair));
+  }
+
+  // The server can still complete a handshake.
+  ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                     server_ctx.get()));
+
+  // Start one more unfinished handshake.
+  ClientServerPair pair;
+  ASSERT_TRUE(CreateClientAndServer(&pair.client, &pair.server,
+                                    client_ctx_good.get(), server_ctx.get()));
+  ASSERT_NO_FATAL_FAILURE(handshake_up_to_serverhello(&pair));
+  pending.push_back(std::move(pair));
+
+  // The credential is at its limit.
+  ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                      server_ctx.get()));
+  ASSERT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL, SSL_R_PAKE_EXHAUSTED));
+
+  // Complete some of the handshakes. As they complete, the server learns that
+  // the client had the correct guess, so the connections no longer count
+  // towards the brute force limit.
+  static constexpr uint32_t kRemainingLimit = kLimit / 2;
+  for (uint32_t i = 0; i < kRemainingLimit; i++) {
+    ASSERT_TRUE(CompleteHandshakes(pending.back().client.get(),
+                                   pending.back().server.get()));
+    pending.pop_back();
+  }
+
+  // The server can complete a handshake now that some of the limit has been
+  // released.
+  ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                     server_ctx.get()));
+
+  // Failed handshakes consume the limit. First consume all but one of the newly
+  // released limit.
+  for (uint32_t i = 0; i < kRemainingLimit - 1; i++) {
+    ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx_bad.get(),
+                                        server_ctx.get()));
+  }
+  ASSERT_TRUE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                     server_ctx.get()));
+
+  // Consume the last of the limit.
+  ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx_bad.get(),
+                                      server_ctx.get()));
+  // The credential is disabled again.
+  ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                      server_ctx.get()));
+  ASSERT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL, SSL_R_PAKE_EXHAUSTED));
+
+  // The unfinished handshakes continue to count toward the limit even if they
+  // are destroyed.
+  pending.clear();
+  ASSERT_FALSE(ConnectClientAndServer(&client, &server, client_ctx_good.get(),
+                                      server_ctx.get()));
+  ASSERT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL, SSL_R_PAKE_EXHAUSTED));
+}
+
+#if defined(OPENSSL_THREADS)
+// The PAKE limit mechanism should be thread-safe.
+TEST_F(SSLPAKETest, ClientThreads) {
+  static constexpr uint32_t kLimit = 5;
+  static constexpr uint32_t kUnlimited = UINT32_MAX;
+  static constexpr int kThreads = 10;
+
+  UniquePtr<SSL_CTX> client_ctx = NewClientContext("password", kLimit);
+  ASSERT_TRUE(client_ctx);
+  UniquePtr<SSL_CTX> server_ctx_good = NewServerContext("password", kUnlimited);
+  ASSERT_TRUE(server_ctx_good);
+  UniquePtr<SSL_CTX> server_ctx_bad = NewServerContext("wrong", kUnlimited);
+  ASSERT_TRUE(server_ctx_bad);
+
+  auto connect = [&](SSL_CTX *server_ctx) {
+    bssl::UniquePtr<SSL> client, server;
+    ConnectClientAndServer(&client, &server, client_ctx.get(), server_ctx);
+  };
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kThreads; i++) {
+    threads.emplace_back([&] { connect(server_ctx_good.get()); });
+    threads.emplace_back([&] { connect(server_ctx_bad.get()); });
+  }
+  for (auto &thread : threads) {
+    thread.join();
+  }
+}
+TEST_F(SSLPAKETest, ServerThreads) {
+  static constexpr uint32_t kLimit = 5;
+  static constexpr uint32_t kUnlimited = UINT32_MAX;
+  static constexpr int kThreads = 10;
+
+  UniquePtr<SSL_CTX> server_ctx = NewServerContext("password", kLimit);
+  ASSERT_TRUE(server_ctx);
+  UniquePtr<SSL_CTX> client_ctx_good = NewClientContext("password", kUnlimited);
+  ASSERT_TRUE(client_ctx_good);
+  UniquePtr<SSL_CTX> client_ctx_bad = NewClientContext("wrong", kUnlimited);
+  ASSERT_TRUE(client_ctx_bad);
+
+  auto connect = [&](SSL_CTX *client_ctx) {
+    bssl::UniquePtr<SSL> client, server;
+    ConnectClientAndServer(&client, &server, client_ctx, server_ctx.get());
+  };
+
+  std::vector<std::thread> threads;
+  for (int i = 0; i < kThreads; i++) {
+    threads.emplace_back([&] { connect(client_ctx_good.get()); });
+    threads.emplace_back([&] { connect(client_ctx_bad.get()); });
+  }
+  for (auto &thread : threads) {
+    thread.join();
+  }
+}
+#endif  // OPENSSL_THREADS
 
 }  // namespace
 BSSL_NAMESPACE_END

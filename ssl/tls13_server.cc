@@ -1,16 +1,16 @@
-/* Copyright 2016 The BoringSSL Authors
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
+// Copyright 2016 The BoringSSL Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <openssl/ssl.h>
 
@@ -42,6 +42,30 @@ static const uint8_t kZeroes[EVP_MAX_MD_SIZE] = {0};
 // drift between client and server clock rate since the ticket was issued.
 // See RFC 8446, section 8.3.
 static const int32_t kMaxTicketAgeSkewSeconds = 60;
+
+static bool resolve_pake_secret(SSL_HANDSHAKE *hs) {
+  uint8_t verifier_share[spake2plus::kShareSize];
+  uint8_t verifier_confirm[spake2plus::kConfirmSize];
+  uint8_t shared_secret[spake2plus::kSecretSize];
+  if (!hs->pake_verifier->ProcessProverShare(verifier_share, verifier_confirm,
+                                             shared_secret,
+                                             hs->pake_share->pake_message)) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_DECODE_ERROR);
+    ssl_send_alert(hs->ssl, SSL3_AL_FATAL, SSL_AD_ILLEGAL_PARAMETER);
+    return false;
+  }
+
+  bssl::ScopedCBB cbb;
+  if (!CBB_init(cbb.get(), sizeof(verifier_share) + sizeof(verifier_confirm)) ||
+      !CBB_add_bytes(cbb.get(), verifier_share, sizeof(verifier_share)) ||
+      !CBB_add_bytes(cbb.get(), verifier_confirm, sizeof(verifier_confirm)) ||
+      !CBBFinishArray(cbb.get(), &hs->pake_share_bytes)) {
+    return false;
+  }
+
+  return tls13_advance_key_schedule(
+      hs, MakeConstSpan(shared_secret, sizeof(shared_secret)));
+}
 
 static bool resolve_ecdhe_secret(SSL_HANDSHAKE *hs,
                                  const SSL_CLIENT_HELLO *client_hello) {
@@ -131,7 +155,10 @@ static bool add_new_session_tickets(SSL_HANDSHAKE *hs, bool *out_sent_tickets) {
       !hs->accept_psk_mode ||
       // We only implement stateless resumption in TLS 1.3, so skip sending
       // tickets if disabled.
-      (SSL_get_options(ssl) & SSL_OP_NO_TICKET)) {
+      (SSL_get_options(ssl) & SSL_OP_NO_TICKET) ||
+      // Don't send tickets for PAKE connections. We don't support resumption
+      // with PAKEs.
+      hs->pake_verifier != nullptr) {
     *out_sent_tickets = false;
     return true;
   }
@@ -220,8 +247,9 @@ static bool add_new_session_tickets(SSL_HANDSHAKE *hs, bool *out_sent_tickets) {
   return true;
 }
 
-static bool check_credential(SSL_HANDSHAKE *hs, const SSL_CREDENTIAL *cred,
-                             uint16_t *out_sigalg) {
+static bool check_signature_credential(SSL_HANDSHAKE *hs,
+                                       const SSL_CREDENTIAL *cred,
+                                       uint16_t *out_sigalg) {
   switch (cred->type) {
     case SSLCredentialType::kX509:
       break;
@@ -234,9 +262,12 @@ static bool check_credential(SSL_HANDSHAKE *hs, const SSL_CREDENTIAL *cred,
         return false;
       }
       break;
+    default:
+      OPENSSL_PUT_ERROR(SSL, SSL_R_UNKNOWN_CERTIFICATE_TYPE);
+      return false;
   }
 
-  // All currently supported credentials require a signature. If |cred| is a
+  // If we reach here then the credential requires a signature. If |cred| is a
   // delegated credential, this also checks that the peer supports delegated
   // credentials and matched |dc_cert_verify_algorithm|.
   if (!tls1_choose_signature_algorithm(hs, cred, out_sigalg)) {
@@ -245,6 +276,21 @@ static bool check_credential(SSL_HANDSHAKE *hs, const SSL_CREDENTIAL *cred,
   // Use this credential if it either matches a requested issuer,
   // or does not require issuer matching.
   return ssl_credential_matches_requested_issuers(hs, cred);
+}
+
+static bool check_pake_credential(SSL_HANDSHAKE *hs,
+                                  const SSL_CREDENTIAL *cred) {
+  assert(cred->type == SSLCredentialType::kSPAKE2PlusV1Server);
+  // Look for a client PAKE share that matches |cred|.
+  if (hs->pake_share == nullptr ||
+      hs->pake_share->named_pake != SSL_PAKE_SPAKE2PLUSV1 ||
+      hs->pake_share->client_identity != Span(cred->client_identity) ||
+      hs->pake_share->server_identity != Span(cred->server_identity)) {
+    OPENSSL_PUT_ERROR(SSL, SSL_R_PEER_PAKE_MISMATCH);
+    return false;
+  }
+
+  return true;
 }
 
 static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
@@ -272,7 +318,7 @@ static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
   }
 
   Array<SSL_CREDENTIAL *> creds;
-  if (!ssl_get_credential_list(hs, &creds)) {
+  if (!ssl_get_full_credential_list(hs, &creds)) {
     return ssl_hs_error;
   }
   if (creds.empty()) {
@@ -284,15 +330,32 @@ static enum ssl_hs_wait_t do_select_parameters(SSL_HANDSHAKE *hs) {
   // Select the credential to use.
   for (SSL_CREDENTIAL *cred : creds) {
     ERR_clear_error();
-    uint16_t sigalg;
-    if (check_credential(hs, cred, &sigalg)) {
-      hs->credential = UpRef(cred);
-      hs->signature_algorithm = sigalg;
-      break;
+    if (cred->type == SSLCredentialType::kSPAKE2PlusV1Server) {
+      if (check_pake_credential(hs, cred)) {
+        hs->credential = UpRef(cred);
+        hs->pake_verifier = MakeUnique<spake2plus::Verifier>();
+        if (hs->pake_verifier == nullptr ||
+            !hs->pake_verifier->Init(cred->pake_context, cred->client_identity,
+                                     cred->server_identity,
+                                     cred->password_verifier_w0,
+                                     cred->registration_record)) {
+          ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_INTERNAL_ERROR);
+          return ssl_hs_error;
+        }
+        break;
+      }
+    } else {
+      uint16_t sigalg;
+      if (check_signature_credential(hs, cred, &sigalg)) {
+        hs->credential = UpRef(cred);
+        hs->signature_algorithm = sigalg;
+        break;
+      }
     }
   }
   if (hs->credential == nullptr) {
     // The error from the last attempt is in the error queue.
+    assert(ERR_peek_error() != 0);
     ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
     return ssl_hs_error;
   }
@@ -356,6 +419,12 @@ static enum ssl_ticket_aead_result_t select_session(
 
   // If the peer did not offer psk_dhe, ignore the resumption.
   if (!hs->accept_psk_mode) {
+    return ssl_ticket_aead_ignore_ticket;
+  }
+
+  // We do not currently support resumption with PAKEs.
+  if (hs->credential != nullptr &&
+      hs->credential->type == SSLCredentialType::kSPAKE2PlusV1Server) {
     return ssl_ticket_aead_ignore_ticket;
   }
 
@@ -484,19 +553,24 @@ static enum ssl_hs_wait_t do_select_session(SSL_HANDSHAKE *hs) {
 
   // Record connection properties in the new session.
   hs->new_session->cipher = hs->new_cipher;
-  if (!tls1_get_shared_group(hs, &hs->new_session->group_id)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_R_NO_SHARED_GROUP);
-    ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
-    return ssl_hs_error;
-  }
 
-  // Determine if we need HelloRetryRequest.
-  bool found_key_share;
-  if (!ssl_ext_key_share_parse_clienthello(hs, &found_key_share,
-                                           /*out_key_share=*/nullptr, &alert,
-                                           &client_hello)) {
-    ssl_send_alert(ssl, SSL3_AL_FATAL, alert);
-    return ssl_hs_error;
+  // If using key shares, resolve the supported group and determine if we need
+  // HelloRetryRequest.
+  bool need_hrr = false;
+  if (hs->pake_verifier == nullptr) {
+    if (!tls1_get_shared_group(hs, &hs->new_session->group_id)) {
+      OPENSSL_PUT_ERROR(SSL, SSL_R_NO_SHARED_GROUP);
+      ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
+      return ssl_hs_error;
+    }
+    bool found_key_share;
+    if (!ssl_ext_key_share_parse_clienthello(hs, &found_key_share,
+                                             /*out_key_share=*/nullptr, &alert,
+                                             &client_hello)) {
+      ssl_send_alert(ssl, SSL3_AL_FATAL, alert);
+      return ssl_hs_error;
+    }
+    need_hrr = !found_key_share;
   }
 
   // Determine if we're negotiating 0-RTT.
@@ -526,7 +600,7 @@ static enum ssl_hs_wait_t do_select_session(SSL_HANDSHAKE *hs) {
     ssl->s3->early_data_reason = ssl_early_data_ticket_age_skew;
   } else if (!quic_ticket_compatible(session.get(), hs->config)) {
     ssl->s3->early_data_reason = ssl_early_data_quic_parameter_mismatch;
-  } else if (!found_key_share) {
+  } else if (need_hrr) {
     ssl->s3->early_data_reason = ssl_early_data_hello_retry_request;
   } else {
     // |ssl_session_is_resumable| forbids cross-cipher resumptions even if the
@@ -592,7 +666,7 @@ static enum ssl_hs_wait_t do_select_session(SSL_HANDSHAKE *hs) {
     ssl->s3->skip_early_data = true;
   }
 
-  if (!found_key_share) {
+  if (need_hrr) {
     ssl->method->next_message(ssl);
     if (!hs->transcript.UpdateForHelloRetryRequest()) {
       return ssl_hs_error;
@@ -601,8 +675,22 @@ static enum ssl_hs_wait_t do_select_session(SSL_HANDSHAKE *hs) {
     return ssl_hs_ok;
   }
 
-  if (!resolve_ecdhe_secret(hs, &client_hello)) {
-    return ssl_hs_error;
+  if (hs->pake_verifier) {
+    assert(!ssl->s3->session_reused);
+    // Revealing the PAKE share (notably confirmV) allows the client to confirm
+    // one PAKE guess, so we must deduct from the brute force limit.
+    if (!hs->credential->ClaimPAKEAttempt()) {
+      OPENSSL_PUT_ERROR(SSL, SSL_R_PAKE_EXHAUSTED);
+      ssl_send_alert(hs->ssl, SSL3_AL_FATAL, SSL_AD_INTERNAL_ERROR);
+      return ssl_hs_error;
+    }
+    if (!resolve_pake_secret(hs)) {
+      return ssl_hs_error;
+    }
+  } else {
+    if (!resolve_ecdhe_secret(hs, &client_hello)) {
+      return ssl_hs_error;
+    }
   }
 
   ssl->method->next_message(ssl);
@@ -617,10 +705,14 @@ static enum ssl_hs_wait_t do_send_hello_retry_request(SSL_HANDSHAKE *hs) {
     return ssl_hs_hints_ready;
   }
 
+  // Although a server could HelloRetryRequest with PAKEs to request a cookie,
+  // we never do so.
+  assert(hs->pake_verifier == nullptr);
   ScopedCBB cbb;
   CBB body, session_id, extensions;
   if (!ssl->method->init_message(ssl, cbb.get(), &body, SSL3_MT_SERVER_HELLO) ||
-      !CBB_add_u16(&body, TLS1_2_VERSION) ||
+      !CBB_add_u16(&body,
+                   SSL_is_dtls(ssl) ? DTLS1_2_VERSION : TLS1_2_VERSION) ||
       !CBB_add_bytes(&body, kHelloRetryRequest, SSL3_RANDOM_SIZE) ||
       !CBB_add_u8_length_prefixed(&body, &session_id) ||
       !CBB_add_bytes(&session_id, hs->session_id.data(),
@@ -679,8 +771,8 @@ static enum ssl_hs_wait_t do_read_second_client_hello(SSL_HANDSHAKE *hs) {
     return ssl_hs_error;
   }
   SSL_CLIENT_HELLO client_hello;
-  if (!ssl_client_hello_init(ssl, &client_hello, msg.body)) {
-    OPENSSL_PUT_ERROR(SSL, SSL_R_CLIENTHELLO_PARSE_FAILED);
+  if (!SSL_parse_client_hello(ssl, &client_hello, CBS_data(&msg.body),
+                              CBS_len(&msg.body))) {
     ssl_send_alert(ssl, SSL3_AL_FATAL, SSL_AD_DECODE_ERROR);
     return ssl_hs_error;
   }
@@ -774,6 +866,9 @@ static enum ssl_hs_wait_t do_read_second_client_hello(SSL_HANDSHAKE *hs) {
     }
   }
 
+  // Although a server could HelloRetryRequest with PAKEs to request a cookie,
+  // we never do so.
+  assert(hs->pake_verifier == nullptr);
   if (!resolve_ecdhe_secret(hs, &client_hello)) {
     return ssl_hs_error;
   }
@@ -813,15 +908,12 @@ static enum ssl_hs_wait_t do_send_server_hello(SSL_HANDSHAKE *hs) {
     }
   }
 
-  uint16_t server_hello_version = TLS1_2_VERSION;
-  if (SSL_is_dtls(ssl)) {
-    server_hello_version = DTLS1_2_VERSION;
-  }
   Array<uint8_t> server_hello;
   ScopedCBB cbb;
   CBB body, extensions, session_id;
   if (!ssl->method->init_message(ssl, cbb.get(), &body, SSL3_MT_SERVER_HELLO) ||
-      !CBB_add_u16(&body, server_hello_version) ||
+      !CBB_add_u16(&body,
+                   SSL_is_dtls(ssl) ? DTLS1_2_VERSION : TLS1_2_VERSION) ||
       !CBB_add_bytes(&body, ssl->s3->server_random,
                      sizeof(ssl->s3->server_random)) ||
       !CBB_add_u8_length_prefixed(&body, &session_id) ||
@@ -831,6 +923,7 @@ static enum ssl_hs_wait_t do_send_server_hello(SSL_HANDSHAKE *hs) {
       !CBB_add_u8(&body, 0) ||
       !CBB_add_u16_length_prefixed(&body, &extensions) ||
       !ssl_ext_pre_shared_key_add_serverhello(hs, &extensions) ||
+      !ssl_ext_pake_add_serverhello(hs, &extensions) ||
       !ssl_ext_key_share_add_serverhello(hs, &extensions) ||
       !ssl_ext_supported_versions_add_serverhello(hs, &extensions) ||
       !ssl->method->finish_message(ssl, cbb.get(), &server_hello)) {
@@ -881,14 +974,9 @@ static enum ssl_hs_wait_t do_send_server_hello(SSL_HANDSHAKE *hs) {
     return ssl_hs_error;
   }
 
-  if (!ssl->s3->session_reused) {
+  if (!ssl->s3->session_reused && !hs->pake_verifier) {
     // Determine whether to request a client certificate.
     hs->cert_request = !!(hs->config->verify_mode & SSL_VERIFY_PEER);
-    // Only request a certificate if Channel ID isn't negotiated.
-    if ((hs->config->verify_mode & SSL_VERIFY_PEER_IF_NO_OBC) &&
-        hs->channel_id_negotiated) {
-      hs->cert_request = false;
-    }
   }
 
   // Send a CertificateRequest, if necessary.
@@ -925,7 +1013,7 @@ static enum ssl_hs_wait_t do_send_server_hello(SSL_HANDSHAKE *hs) {
   }
 
   // Send the server Certificate message, if necessary.
-  if (!ssl->s3->session_reused) {
+  if (!ssl->s3->session_reused && !hs->pake_verifier) {
     if (!tls13_add_certificate(hs)) {
       return ssl_hs_error;
     }
@@ -1271,6 +1359,13 @@ static enum ssl_hs_wait_t do_read_client_finished(SSL_HANDSHAKE *hs) {
   } else {
     // We already sent half-RTT tickets.
     hs->tls13_state = state13_done;
+  }
+
+  if (hs->credential != nullptr &&
+      hs->credential->type == SSLCredentialType::kSPAKE2PlusV1Server) {
+    // The client has now confirmed that it does know the correct password, so
+    // this connection no longer counts towards the brute force limit.
+    hs->credential->RestorePAKEAttempt();
   }
 
   ssl->method->next_message(ssl);

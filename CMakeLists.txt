@@ -1,16 +1,16 @@
 # Copyright 2014 The BoringSSL Authors
 #
-# Permission to use, copy, modify, and/or distribute this software for any
-# purpose with or without fee is hereby granted, provided that the above
-# copyright notice and this permission notice appear in all copies.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-# SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-# OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-# CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 cmake_minimum_required(VERSION 3.16)
 
@@ -549,7 +549,7 @@ if(FIPS_DELOCATE)
     set(TARGET_FLAG "--target=${CMAKE_ASM_COMPILER_TARGET}")
   endif()
 
-  go_executable(delocate boringssl.googlesource.com/boringssl/util/fipstools/delocate)
+  go_executable(delocate boringssl.googlesource.com/boringssl.git/util/fipstools/delocate)
   add_custom_command(
     OUTPUT bcm-delocated.S
     COMMAND ${CMAKE_CURRENT_BINARY_DIR}/delocate
@@ -571,7 +571,7 @@ if(FIPS_DELOCATE)
   set_target_properties(bcm_hashunset PROPERTIES LINKER_LANGUAGE C)
 
   go_executable(inject_hash
-                boringssl.googlesource.com/boringssl/util/fipstools/inject_hash)
+                boringssl.googlesource.com/boringssl.git/util/fipstools/inject_hash)
   add_custom_command(
     OUTPUT bcm.o
     COMMAND ./inject_hash -o bcm.o -in-archive $<TARGET_FILE:bcm_hashunset>
@@ -753,9 +753,9 @@ if(FIPS)
   add_custom_target(
     acvp_tests
     COMMAND ${GO_EXECUTABLE} build -o ${CMAKE_CURRENT_BINARY_DIR}/acvptool
-            boringssl.googlesource.com/boringssl/util/fipstools/acvp/acvptool
+            boringssl.googlesource.com/boringssl.git/util/fipstools/acvp/acvptool
     COMMAND ${GO_EXECUTABLE} build -o ${CMAKE_CURRENT_BINARY_DIR}/testmodulewrapper
-            boringssl.googlesource.com/boringssl/util/fipstools/acvp/acvptool/testmodulewrapper
+            boringssl.googlesource.com/boringssl.git/util/fipstools/acvp/acvptool/testmodulewrapper
     COMMAND cd util/fipstools/acvp/acvptool/test &&
             ${GO_EXECUTABLE} run check_expected.go
             -tool ${CMAKE_CURRENT_BINARY_DIR}/acvptool

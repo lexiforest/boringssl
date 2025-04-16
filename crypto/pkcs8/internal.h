@@ -1,11 +1,16 @@
-/*
- * Copyright 1999-2016 The OpenSSL Project Authors. All Rights Reserved.
- *
- * Licensed under the OpenSSL license (the "License").  You may not use
- * this file except in compliance with the License.  You can obtain a copy
- * in the file LICENSE in the source distribution or at
- * https://www.openssl.org/source/license.html
- */
+// Copyright 1999-2016 The OpenSSL Project Authors. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #ifndef OPENSSL_HEADER_PKCS8_INTERNAL_H
 #define OPENSSL_HEADER_PKCS8_INTERNAL_H
@@ -46,11 +51,13 @@ int pkcs12_key_gen(const char *pass, size_t pass_len, const uint8_t *salt,
                    size_t out_len, uint8_t *out, const EVP_MD *md);
 
 // pkcs12_pbe_encrypt_init configures |ctx| for encrypting with a PBES1 scheme
-// defined in PKCS#12. It writes the corresponding AlgorithmIdentifier to |out|.
-int pkcs12_pbe_encrypt_init(CBB *out, EVP_CIPHER_CTX *ctx, int alg,
-                            uint32_t iterations, const char *pass,
-                            size_t pass_len, const uint8_t *salt,
-                            size_t salt_len);
+// defined in PKCS#12, or a PBES2 scheme defined in PKCS#5. The algorithm is
+// determined as in |PKCS8_encrypt|. It writes the corresponding
+// AlgorithmIdentifier to |out|.
+int pkcs12_pbe_encrypt_init(CBB *out, EVP_CIPHER_CTX *ctx, int alg_nid,
+                            const EVP_CIPHER *alg_cipher, uint32_t iterations,
+                            const char *pass, size_t pass_len,
+                            const uint8_t *salt, size_t salt_len);
 
 struct pbe_suite {
   int pbe_nid;
@@ -68,6 +75,10 @@ struct pbe_suite {
 };
 
 #define PKCS5_SALT_LEN 8
+
+// pkcs5_pbe2_nid_to_cipher returns the |EVP_CIPHER| for |nid| if |nid| is
+// supported with PKCS#5 PBES2, and nullptr otherwise.
+const EVP_CIPHER *pkcs5_pbe2_nid_to_cipher(int nid);
 
 int PKCS5_pbe2_decrypt_init(const struct pbe_suite *suite, EVP_CIPHER_CTX *ctx,
                             const char *pass, size_t pass_len, CBS *param);

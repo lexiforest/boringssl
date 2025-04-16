@@ -22,10 +22,13 @@ use [Gerrit](https://boringssl-review.googlesource.com) for this purpose.
 If you have not done so on this machine, you will need to set up a password for
 Gerrit. Sign in with a Google account, visit
 [this link](https://boringssl.googlesource.com/), and click the "Generate
-Password" link in the top right. You must also have a Gerrit account associated with
+Password" link in the top right.
+
+You must also have a Gerrit account associated with
 your Google account.  To do this visit the [Gerrit review server](https://boringssl-review.googlesource.com)
 and click "Sign in" (top right).
-You will also need to prepare your checkout to
+
+Finally, you will need to prepare your checkout to
 [add Change-Ids](https://gerrit-review.googlesource.com/Documentation/cmd-hook-commit-msg.html)
 on commit. Run:
 
@@ -33,9 +36,9 @@ on commit. Run:
     chmod u+x .git/hooks/commit-msg
 
 #### Uploading changes
-To upload a change, push it to the special `refs/for/master` target:
+To upload a change, push it to the special `refs/for/main` target:
 
-    git push origin HEAD:refs/for/master
+    git push origin HEAD:refs/for/main
 
 The output will then give you a link to the change. Add `agl@google.com`,
 `davidben@google.com`, and `bbe@google.com` as reviewers.
@@ -66,3 +69,11 @@ welcome to send us a patch to be added, or request that we add you.
 Contributions made by corporations are covered by a different agreement than
 the one above, the
 [Software Grant and Corporate Contributor License Agreement](https://cla.developers.google.com/about/google-corporate).
+
+The following are Google-internal bug numbers where explicit permission from
+some authors is recorded for use of their work. (This is purely for our own
+record keeping.)
+*  27287199
+*  27287880
+*  27287883
+*  263291445

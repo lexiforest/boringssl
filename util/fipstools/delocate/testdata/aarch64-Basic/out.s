@@ -53,27 +53,6 @@ foo:
 	adr x0, .Llocal_data
 // WAS add x0, x0, :lo12:.Llocal_data
 
-	// armcap
-// WAS adrp x1, OPENSSL_armcap_P
-	sub sp, sp, 128
-	stp x0, lr, [sp, #-16]!
-	bl .LOPENSSL_armcap_P_addr
-	mov x1, x0
-	ldp x0, lr, [sp], #16
-	add sp, sp, 128
-// WAS ldr w2, [x1, :lo12:OPENSSL_armcap_P]
-	ldr	w2, [x1]
-
-	// armcap to w0
-// WAS adrp x0, OPENSSL_armcap_P
-	sub sp, sp, 128
-	stp x0, lr, [sp, #-16]!
-	bl .LOPENSSL_armcap_P_addr
-	ldp xzr, lr, [sp], #16
-	add sp, sp, 128
-// WAS ldr w1, [x1, :lo12:OPENSSL_armcap_P]
-	ldr	w1, [x1]
-
 	// Load from local symbol
 // WAS adrp x10, .Llocal_data2
 	adr x10, .Llocal_data2
@@ -219,17 +198,6 @@ bss_symbol_bss_get:
 	ret
 .cfi_endproc
 .size .Lboringssl_loadgot_stderr, .-.Lboringssl_loadgot_stderr
-.p2align 2
-.hidden .LOPENSSL_armcap_P_addr
-.type .LOPENSSL_armcap_P_addr, @function
-.LOPENSSL_armcap_P_addr:
-.cfi_startproc
-	hint #34 // bti c
-	adrp x0, OPENSSL_armcap_P
-	add x0, x0, :lo12:OPENSSL_armcap_P
-	ret
-.cfi_endproc
-.size .LOPENSSL_armcap_P_addr, .-.LOPENSSL_armcap_P_addr
 .type BORINGSSL_bcm_text_hash, @object
 .size BORINGSSL_bcm_text_hash, 32
 BORINGSSL_bcm_text_hash:

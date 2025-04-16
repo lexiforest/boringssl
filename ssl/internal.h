@@ -1,13 +1,18 @@
-/*
- * Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
- * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2005 Nokia. All rights reserved.
- *
- * Licensed under the OpenSSL license (the "License").  You may not use
- * this file except in compliance with the License.  You can obtain a copy
- * in the file LICENSE in the source distribution or at
- * https://www.openssl.org/source/license.html
- */
+// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+// Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
+// Copyright 2005 Nokia. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #ifndef OPENSSL_HEADER_SSL_INTERNAL_H
 #define OPENSSL_HEADER_SSL_INTERNAL_H
@@ -17,6 +22,7 @@
 #include <stdlib.h>
 
 #include <algorithm>
+#include <atomic>
 #include <bitset>
 #include <initializer_list>
 #include <limits>
@@ -38,6 +44,7 @@
 #include "../crypto/err/internal.h"
 #include "../crypto/internal.h"
 #include "../crypto/lhash/internal.h"
+#include "../crypto/spake2plus/internal.h"
 
 
 #if defined(OPENSSL_WINDOWS)
@@ -1820,6 +1827,8 @@ bool ssl_encrypt_client_hello(SSL_HANDSHAKE *hs, Span<const uint8_t> enc);
 enum class SSLCredentialType {
   kX509,
   kDelegated,
+  kSPAKE2PlusV1Client,
+  kSPAKE2PlusV1Server,
 };
 
 BSSL_NAMESPACE_END
@@ -1914,6 +1923,27 @@ struct ssl_credential_st : public bssl::RefCounted<ssl_credential_st> {
   // OCSP response to be sent to the client, if requested.
   bssl::UniquePtr<CRYPTO_BUFFER> ocsp_response;
 
+  // SPAKE2+-specific information.
+  bssl::Array<uint8_t> pake_context;
+  bssl::Array<uint8_t> client_identity;
+  bssl::Array<uint8_t> server_identity;
+  bssl::Array<uint8_t> password_verifier_w0;
+  bssl::Array<uint8_t> password_verifier_w1;  // server-only
+  bssl::Array<uint8_t> registration_record;   // client-only
+  mutable std::atomic<uint32_t> pake_limit;
+
+  // Checks whether there are still permitted PAKE attempts remaining, without
+  // changing the counter.
+  bool HasPAKEAttempts() const;
+
+  // Atomically decrement |pake_limit|. Return true if successful and false if
+  // |pake_limit| is already zero.
+  bool ClaimPAKEAttempt() const;
+
+  // Atomically increment |pake_limit|. This must be paired with a
+  // |ClaimPAKEAttempt| call.
+  void RestorePAKEAttempt() const;
+
   CRYPTO_EX_DATA ex_data;
 
   // must_match_issuer is a flag indicating that this credential should be
@@ -1928,16 +1958,24 @@ struct ssl_credential_st : public bssl::RefCounted<ssl_credential_st> {
 
 BSSL_NAMESPACE_BEGIN
 
-// ssl_get_credential_list computes |hs|'s credential list. On success, it
-// writes it to |*out| and returns true. Otherwise, it returns false. The
-// credential list may be empty, in which case this function will successfully
-// return an empty array.
+// ssl_get_full_credential_list computes |hs|'s full credential list, including
+// the legacy credential. On success, it writes it to |*out| and returns true.
+// Otherwise, it returns false. The credential list may be empty, in which case
+// this function will successfully output an empty array.
+//
+// This function should be called at most once during the handshake and is
+// intended to be used for certificate-based credentials. It runs the
+// auto-chaining logic as part of finishing the legacy credential. Other uses of
+// the credential list (e.g. PAKE credentials) should iterate over
+// |hs->config->cert->credentials|.
 //
 // The pointers in the result are only valid until |hs| is next mutated.
-bool ssl_get_credential_list(SSL_HANDSHAKE *hs, Array<SSL_CREDENTIAL *> *out);
+bool ssl_get_full_credential_list(SSL_HANDSHAKE *hs,
+                                  Array<SSL_CREDENTIAL *> *out);
 
 // ssl_credential_matches_requested_issuers returns true if |cred| is a
-// usable match for any requested issuers in |hs|.
+// usable match for any requested issuers in |hs|, and false with an error
+// otherwise.
 bool ssl_credential_matches_requested_issuers(SSL_HANDSHAKE *hs,
                                               const SSL_CREDENTIAL *cred);
 
@@ -2061,6 +2099,14 @@ struct SSL_HANDSHAKE_HINTS {
   Array<uint8_t> decrypted_ticket;
   bool renew_ticket = false;
   bool ignore_ticket = false;
+};
+
+struct SSLPAKEShare {
+  static constexpr bool kAllowUniquePtr = true;
+  uint16_t named_pake;
+  Array<uint8_t> client_identity;
+  Array<uint8_t> server_identity;
+  Array<uint8_t> pake_message;
 };
 
 struct SSL_HANDSHAKE {
@@ -2396,6 +2442,18 @@ struct SSL_HANDSHAKE {
 
   // grease_seed is the entropy for GREASE values.
   uint8_t grease_seed[ssl_grease_last_index + 1] = {0};
+
+  // pake_share is the PAKE message received over the wire, if any.
+  UniquePtr<SSLPAKEShare> pake_share;
+
+  // pake_share_bytes are the bytes of the PAKEShare to send, if any.
+  Array<uint8_t> pake_share_bytes;
+
+  // pake_prover is the PAKE context for a client.
+  UniquePtr<spake2plus::Prover> pake_prover;
+
+  // pake_verifier is the PAKE context for a server.
+  UniquePtr<spake2plus::Verifier> pake_verifier;
 };
 
 // kMaxTickets is the maximum number of tickets to send immediately after the
@@ -2474,6 +2532,10 @@ bool ssl_set_key_usage_check_enabled(SSL_HANDSHAKE *hs);
 // a single key share of the specified group.
 bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id);
 
+// ssl_setup_pake_shares computes the client PAKE shares and saves them in |hs|.
+// It returns true on success and false on failure.
+bool ssl_setup_pake_shares(SSL_HANDSHAKE *hs);
+
 bool ssl_ext_key_share_parse_serverhello(SSL_HANDSHAKE *hs,
                                          Array<uint8_t> *out_secret,
                                          uint8_t *out_alert, CBS *contents);
@@ -2481,7 +2543,12 @@ bool ssl_ext_key_share_parse_clienthello(SSL_HANDSHAKE *hs, bool *out_found,
                                          Span<const uint8_t> *out_peer_key,
                                          uint8_t *out_alert,
                                          const SSL_CLIENT_HELLO *client_hello);
+bool ssl_ext_pake_add_serverhello(SSL_HANDSHAKE *hs, CBB *out);
 bool ssl_ext_key_share_add_serverhello(SSL_HANDSHAKE *hs, CBB *out);
+
+bool ssl_ext_pake_parse_serverhello(SSL_HANDSHAKE *hs,
+                                    Array<uint8_t> *out_secret,
+                                    uint8_t *out_alert, CBS *contents);
 
 bool ssl_ext_pre_shared_key_parse_serverhello(SSL_HANDSHAKE *hs,
                                               uint8_t *out_alert,
@@ -2626,12 +2693,6 @@ bool ssl_log_secret(const SSL *ssl, const char *label,
 
 
 // ClientHello functions.
-
-// ssl_client_hello_init parses |body| as a ClientHello message, excluding the
-// message header, and writes the result to |*out|. It returns true on success
-// and false on error. This function is exported for testing.
-OPENSSL_EXPORT bool ssl_client_hello_init(const SSL *ssl, SSL_CLIENT_HELLO *out,
-                                          Span<const uint8_t> body);
 
 bool ssl_parse_client_hello_with_trailing_data(const SSL *ssl, CBS *cbs,
                                                SSL_CLIENT_HELLO *out);
@@ -3680,15 +3741,6 @@ struct SSL_CONFIG {
   // alps_use_new_codepoint if set indicates we use new ALPS extension codepoint
   // to negotiate and convey application settings.
   bool alps_use_new_codepoint : 1;
-
-  // check_client_certificate_type indicates whether the client, in TLS 1.2 and
-  // below, will check its certificate against the server's requested
-  // certificate types.
-  bool check_client_certificate_type : 1;
-
-  // check_ecdsa_curve indicates whether the server, in TLS 1.2 and below, will
-  // check its certificate against the client's supported ECDSA curves.
-  bool check_ecdsa_curve : 1;
 };
 
 // From RFC 8446, used in determining PSK modes.
@@ -4526,7 +4578,7 @@ struct ssl_session_st : public bssl::RefCounted<ssl_session_st> {
   // original_handshake_hash contains the handshake hash (either SHA-1+MD5 or
   // SHA-2, depending on TLS version) for the original, full handshake that
   // created a session. This is used by Channel IDs during resumption.
-  bssl::InplaceVector<uint8_t, EVP_MAX_MD_SIZE> original_handshake_hash;
+  bssl::InplaceVector<uint8_t, SSL_MAX_MD_SIZE> original_handshake_hash;
 
   uint32_t ticket_lifetime_hint = 0;  // Session lifetime hint in seconds
 

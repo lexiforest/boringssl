@@ -20,7 +20,8 @@ import (
 	"slices"
 	"time"
 
-	"boringssl.googlesource.com/boringssl/ssl/test/runner/hpke"
+	"boringssl.googlesource.com/boringssl.git/ssl/test/runner/hpke"
+	"boringssl.googlesource.com/boringssl.git/ssl/test/runner/spake2plus"
 	"golang.org/x/crypto/cryptobyte"
 )
 
@@ -170,6 +171,11 @@ func (hs *serverHandshakeState) readClientHello() error {
 	hs.clientHello, err = readHandshakeType[clientHelloMsg](c)
 	if err != nil {
 		return err
+	}
+	if config.Bugs.CheckClientHello != nil {
+		if err = config.Bugs.CheckClientHello(hs.clientHello); err != nil {
+			return err
+		}
 	}
 	if size := config.Bugs.RequireClientHelloSize; size != 0 && len(hs.clientHello.raw) != size {
 		return fmt.Errorf("tls: ClientHello record size is %d, but expected %d", len(hs.clientHello.raw), size)
@@ -590,22 +596,6 @@ func (hs *serverHandshakeState) doTLS13Handshake() error {
 	hs.finishedHash.discardHandshakeBuffer()
 	hs.writeClientHash(hs.clientHello.marshal())
 
-	supportedCurve := false
-	var selectedCurve CurveID
-	preferredCurves := config.curvePreferences()
-	for _, curve := range hs.clientHello.supportedCurves {
-		if slices.Contains(preferredCurves, curve) {
-			supportedCurve = true
-			selectedCurve = curve
-			break
-		}
-	}
-
-	if !supportedCurve {
-		c.sendAlert(alertHandshakeFailure)
-		return errors.New("tls: no curve supported by both client and server")
-	}
-
 	pskIdentities := hs.clientHello.pskIdentities
 	pskKEModes := hs.clientHello.pskKEModes
 
@@ -688,7 +678,8 @@ func (hs *serverHandshakeState) doTLS13Handshake() error {
 		return errors.New("tls: early data extension received in DTLS")
 	}
 
-	hs.hello.hasKeyShare = true
+	// Decide whether to use key_share.
+	hs.hello.hasKeyShare = config.Credential.Type != CredentialTypeSPAKE2PlusV1 && config.Bugs.UnsolicitedPAKE == 0
 	if hs.sessionState != nil && config.Bugs.NegotiatePSKResumption {
 		hs.hello.hasKeyShare = false
 	}
@@ -696,10 +687,8 @@ func (hs *serverHandshakeState) doTLS13Handshake() error {
 		hs.hello.hasKeyShare = false
 	}
 
-	firstHelloRetryRequest := true
-
-ResendHelloRetryRequest:
-	var sendHelloRetryRequest bool
+	// Decide whether a HelloRetryRequest is needed.
+	sendHelloRetryRequest := config.Bugs.AlwaysSendHelloRetryRequest
 	cipherSuite := hs.suite.id
 	if config.Bugs.SendHelloRetryRequestCipherSuite != 0 {
 		cipherSuite = config.Bugs.SendHelloRetryRequestCipherSuite
@@ -713,10 +702,6 @@ ResendHelloRetryRequest:
 		duplicateExtensions: config.Bugs.DuplicateHelloRetryRequestExtensions,
 	}
 
-	if config.Bugs.AlwaysSendHelloRetryRequest {
-		sendHelloRetryRequest = true
-	}
-
 	if config.Bugs.SendHelloRetryRequestCookie != nil {
 		sendHelloRetryRequest = true
 		helloRetryRequest.cookie = config.Bugs.SendHelloRetryRequestCookie
@@ -727,8 +712,24 @@ ResendHelloRetryRequest:
 		helloRetryRequest.customExtension = config.Bugs.CustomHelloRetryRequestExtension
 	}
 
+	var selectedCurve CurveID
 	var selectedKeyShare *keyShareEntry
 	if hs.hello.hasKeyShare {
+		// Select the matching curve.
+		supportedCurve := false
+		preferredCurves := config.curvePreferences()
+		for _, curve := range hs.clientHello.supportedCurves {
+			if slices.Contains(preferredCurves, curve) {
+				supportedCurve = true
+				selectedCurve = curve
+				break
+			}
+		}
+		if !supportedCurve {
+			c.sendAlert(alertHandshakeFailure)
+			return errors.New("tls: no curve supported by both client and server")
+		}
+
 		// Look for the key share corresponding to our selected curve.
 		for i := range hs.clientHello.keyShares {
 			if hs.clientHello.keyShares[i].group == selectedCurve {
@@ -756,6 +757,12 @@ ResendHelloRetryRequest:
 
 	if config.Bugs.SkipHelloRetryRequest {
 		sendHelloRetryRequest = false
+	}
+
+	if config.Bugs.SendPAKEInHelloRetryRequest {
+		helloRetryRequest.pakeID = spakeID
+		helloRetryRequest.pakeMessage = []byte{1}
+		sendHelloRetryRequest = true
 	}
 
 	if sendHelloRetryRequest {
@@ -906,9 +913,14 @@ ResendHelloRetryRequest:
 			return err
 		}
 
-		if firstHelloRetryRequest && config.Bugs.SecondHelloRetryRequest {
-			firstHelloRetryRequest = false
-			goto ResendHelloRetryRequest
+		if config.Bugs.SecondHelloRetryRequest {
+			c.writeRecord(recordTypeHandshake, helloRetryRequest.marshal())
+			// The peer should reject this. Read from the connection to pick up the alert.
+			_, err := c.readHandshake()
+			if err != nil {
+				return err
+			}
+			return errors.New("tls: client sent message instead of alert")
 		}
 	}
 
@@ -1013,6 +1025,51 @@ ResendHelloRetryRequest:
 				keyExchange: ciphertext,
 			}
 		}
+	} else if hs.cert.Type == CredentialTypeSPAKE2PlusV1 {
+		if len(hs.clientHello.pakeShares) == 0 {
+			return errors.New("tls: client not configured with PAKE")
+		}
+		if !bytes.Equal(hs.clientHello.pakeClientID, hs.cert.PAKEClientID) ||
+			!bytes.Equal(hs.clientHello.pakeServerID, hs.cert.PAKEServerID) {
+			return fmt.Errorf("tls: client configured with different PAKE identities: got (%x, %x), wanted (%x, %x)", hs.clientHello.pakeClientID, hs.clientHello.pakeServerID, hs.cert.PAKEClientID, hs.cert.PAKEServerID)
+		}
+		var pakeMessage []byte
+		for _, pake := range hs.clientHello.pakeShares {
+			if pake.id == spakeID {
+				pakeMessage = pake.msg
+			}
+		}
+		if pakeMessage == nil {
+			return errors.New("tls: client does not support SPAKE2+")
+		}
+		w0, _, registrationRecord, err := spake2plus.Register(hs.cert.PAKEPassword, hs.cert.PAKEClientID, hs.cert.PAKEServerID)
+		if err != nil {
+			return err
+		}
+		pake, err := spake2plus.NewVerifier(hs.cert.PAKEContext, hs.cert.PAKEClientID, hs.cert.PAKEServerID, w0, registrationRecord)
+		if err != nil {
+			return err
+		}
+		share, confirm, sharedSecret, err := pake.ProcessProverShare(pakeMessage)
+		if err != nil {
+			c.sendAlert(alertHandshakeFailure)
+			return fmt.Errorf("while processing SPAKE2+ prover share: %w", err)
+		}
+		hs.finishedHash.nextSecret()
+		hs.finishedHash.addEntropy(sharedSecret)
+		hs.hello.pakeID = spakeID
+		if hs.cert.OverridePAKECodepoint != 0 {
+			hs.hello.pakeID = hs.cert.OverridePAKECodepoint
+		}
+		hs.hello.pakeMessage = slices.Concat(share, confirm)
+		if c.config.Bugs.TruncatePAKEMessage {
+			hs.hello.pakeMessage = hs.hello.pakeMessage[:len(hs.hello.pakeMessage)-1]
+		}
+	} else if config.Bugs.UnsolicitedPAKE != 0 {
+		hs.finishedHash.nextSecret()
+		hs.finishedHash.addEntropy(hs.finishedHash.zeroSecret())
+		hs.hello.pakeID = config.Bugs.UnsolicitedPAKE
+		hs.hello.pakeMessage = []byte{1}
 	} else {
 		hs.finishedHash.nextSecret()
 		hs.finishedHash.addEntropy(hs.finishedHash.zeroSecret())
@@ -1066,46 +1123,54 @@ ResendHelloRetryRequest:
 		c.writeRecord(recordTypeHandshake, encryptedExtensions.marshal())
 	}
 
-	if hs.sessionState == nil {
-		if config.ClientAuth >= RequestClientCert {
-			// Request a client certificate
-			certReq := &certificateRequestMsg{
-				vers:                  c.wireVersion,
-				hasSignatureAlgorithm: !config.Bugs.OmitCertificateRequestAlgorithms,
-				hasRequestContext:     true,
-				requestContext:        config.Bugs.SendRequestContext,
-				customExtension:       config.Bugs.SendCustomCertificateRequest,
-			}
-			if !config.Bugs.NoSignatureAlgorithms {
-				certReq.signatureAlgorithms = config.verifySignatureAlgorithms()
-			}
-
-			// An empty list of certificateAuthorities signals to
-			// the client that it may send any certificate in response
-			// to our request. When we know the CAs we trust, then
-			// we can send them down, so that the client can choose
-			// an appropriate certificate to give to us.
-			if config.ClientCAs != nil {
-				certReq.certificateAuthorities = config.ClientCAs.Subjects()
-			}
-			hs.writeServerHash(certReq.marshal())
-			c.writeRecord(recordTypeHandshake, certReq.marshal())
+	var requestClientCert bool
+	if (hs.sessionState == nil && hs.cert.Type != CredentialTypeSPAKE2PlusV1) || config.Bugs.AlwaysSendCertificateRequest {
+		requestClientCert = config.ClientAuth >= RequestClientCert
+	}
+	if requestClientCert {
+		// Request a client certificate
+		certReq := &certificateRequestMsg{
+			vers:                  c.wireVersion,
+			hasSignatureAlgorithm: !config.Bugs.OmitCertificateRequestAlgorithms,
+			hasRequestContext:     true,
+			requestContext:        config.Bugs.SendRequestContext,
+			customExtension:       config.Bugs.SendCustomCertificateRequest,
+		}
+		if !config.Bugs.NoSignatureAlgorithms {
+			certReq.signatureAlgorithms = config.verifySignatureAlgorithms()
 		}
 
+		// An empty list of certificateAuthorities signals to
+		// the client that it may send any certificate in response
+		// to our request. When we know the CAs we trust, then
+		// we can send them down, so that the client can choose
+		// an appropriate certificate to give to us.
+		if config.ClientCAs != nil {
+			certReq.certificateAuthorities = config.ClientCAs.Subjects()
+		}
+		hs.writeServerHash(certReq.marshal())
+		c.writeRecord(recordTypeHandshake, certReq.marshal())
+	}
+
+	if (hs.sessionState == nil && hs.cert.Type != CredentialTypeSPAKE2PlusV1) || config.Bugs.AlwaysSendCertificate {
+		useCert := hs.cert
+		if config.Bugs.UseCertificateCredential != nil {
+			useCert = config.Bugs.UseCertificateCredential
+		}
 		certMsg := &certificateMsg{
 			hasRequestContext: true,
 		}
 		if !config.Bugs.EmptyCertificateList {
-			for i, certData := range hs.cert.Certificate {
+			for i, certData := range useCert.Certificate {
 				cert := certificateEntry{
 					data: certData,
 				}
 				if i == 0 {
 					if hs.clientHello.ocspStapling && !c.config.Bugs.NoOCSPStapling {
-						cert.ocspResponse = hs.cert.OCSPStaple
+						cert.ocspResponse = useCert.OCSPStaple
 					}
 					if hs.clientHello.sctListSupported && !c.config.Bugs.NoSignedCertificateTimestamps {
-						cert.sctList = hs.cert.SignedCertificateTimestampList
+						cert.sctList = useCert.SignedCertificateTimestampList
 					}
 					cert.duplicateExtensions = config.Bugs.SendDuplicateCertExtensions
 					cert.extraExtension = config.Bugs.SendExtensionOnCertificate
@@ -1169,13 +1234,13 @@ ResendHelloRetryRequest:
 
 		// Determine the hash to sign.
 		var err error
-		certVerify.signatureAlgorithm, err = selectSignatureAlgorithm(c.isClient, c.vers, hs.cert, config, hs.clientHello.signatureAlgorithms)
+		certVerify.signatureAlgorithm, err = selectSignatureAlgorithm(c.isClient, c.vers, useCert, config, hs.clientHello.signatureAlgorithms)
 		if err != nil {
 			c.sendAlert(alertInternalError)
 			return err
 		}
 
-		privKey := hs.cert.PrivateKey
+		privKey := useCert.PrivateKey
 		input := hs.finishedHash.certificateVerifyInput(serverCertificateVerifyContextTLS13)
 		certVerify.signature, err = signMessage(c.isClient, c.vers, privKey, c.config, certVerify.signatureAlgorithm, input)
 		if err != nil {
@@ -1306,7 +1371,7 @@ ResendHelloRetryRequest:
 
 	// If we requested a client certificate, then the client must send a
 	// certificate message, even if it's empty.
-	if config.ClientAuth >= RequestClientCert {
+	if requestClientCert {
 		certMsg, err := readHandshakeType[certificateMsg](c)
 		if err != nil {
 			return err
@@ -2039,8 +2104,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 func (hs *serverHandshakeState) establishKeys() error {
 	c := hs.c
 
-	clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV :=
-		keysFromMasterSecret(c.vers, hs.suite, hs.masterSecret, hs.clientHello.random, hs.hello.random, hs.suite.macLen, hs.suite.keyLen, hs.suite.ivLen(c.vers))
+	clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV := keysFromMasterSecret(c.vers, hs.suite, hs.masterSecret, hs.clientHello.random, hs.hello.random, hs.suite.macLen, hs.suite.keyLen, hs.suite.ivLen(c.vers))
 
 	var clientCipher, serverCipher any
 	var clientHash, serverHash macFunction

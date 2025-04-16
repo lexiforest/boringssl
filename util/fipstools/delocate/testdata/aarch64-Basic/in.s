@@ -25,14 +25,6 @@ foo:
 	adrp x0, .Llocal_data
 	add x0, x0, :lo12:.Llocal_data
 
-	// armcap
-	adrp x1, OPENSSL_armcap_P
-	ldr w2, [x1, :lo12:OPENSSL_armcap_P]
-
-	// armcap to w0
-	adrp x0, OPENSSL_armcap_P
-	ldr w1, [x1, :lo12:OPENSSL_armcap_P]
-
 	// Load from local symbol
 	adrp x10, .Llocal_data2
 	ldr q0, [x10, :lo12:.Llocal_data2]

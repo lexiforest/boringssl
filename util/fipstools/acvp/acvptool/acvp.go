@@ -1,22 +1,23 @@
 // Copyright 2019 The BoringSSL Authors
 //
-// Permission to use, copy, modify, and/or distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package main
 
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -39,20 +40,23 @@ import (
 	"strings"
 	"time"
 
-	"boringssl.googlesource.com/boringssl/util/fipstools/acvp/acvptool/acvp"
-	"boringssl.googlesource.com/boringssl/util/fipstools/acvp/acvptool/subprocess"
+	"boringssl.googlesource.com/boringssl.git/util/fipstools/acvp/acvptool/acvp"
+	"boringssl.googlesource.com/boringssl.git/util/fipstools/acvp/acvptool/subprocess"
+	"cloud.google.com/go/storage"
+	"google.golang.org/api/iterator"
 )
 
 var (
-	dumpRegcap      = flag.Bool("regcap", false, "Print module capabilities JSON to stdout")
-	configFilename  = flag.String("config", "config.json", "Location of the configuration JSON file")
-	jsonInputFile   = flag.String("json", "", "Location of a vector-set input file")
-	uploadInputFile = flag.String("upload", "", "Location of a JSON results file to upload")
-	uploadDirectory = flag.String("directory", "", "Path to folder where result files to be uploaded are")
-	runFlag         = flag.String("run", "", "Name of primitive to run tests for")
-	fetchFlag       = flag.String("fetch", "", "Name of primitive to fetch vectors for")
-	expectedOutFlag = flag.String("expected-out", "", "Name of a file to write the expected results to")
-	wrapperPath     = flag.String("wrapper", "../../../../build/util/fipstools/acvp/modulewrapper/modulewrapper", "Path to the wrapper binary")
+	dumpRegcap         = flag.Bool("regcap", false, "Print module capabilities JSON to stdout")
+	configFilename     = flag.String("config", "config.json", "Location of the configuration JSON file")
+	jsonInputFile      = flag.String("json", "", "Location of a vector-set input file")
+	uploadInputFile    = flag.String("upload", "", "Location of a JSON results file to upload")
+	uploadDirectory    = flag.String("directory", "", "Path to folder where result files to be uploaded are")
+	uploadGcsDirectory = flag.String("gcs", "", "GCS path to folder where result files to be uploaded are")
+	runFlag            = flag.String("run", "", "Name of primitive to run tests for")
+	fetchFlag          = flag.String("fetch", "", "Name of primitive to fetch vectors for")
+	expectedOutFlag    = flag.String("expected-out", "", "Name of a file to write the expected results to")
+	wrapperPath        = flag.String("wrapper", "../../../../build/util/fipstools/acvp/modulewrapper/modulewrapper", "Path to the wrapper binary")
 )
 
 type Config struct {
@@ -179,6 +183,13 @@ func loadCachedSessionTokens(server *acvp.Server, cachePath string) error {
 func trimLeadingSlash(s string) string {
 	if strings.HasPrefix(s, "/") {
 		return s[1:]
+	}
+	return s
+}
+
+func addTrailingSlash(s string) string {
+	if !strings.HasSuffix(s, "/") {
+		s += "/"
 	}
 	return s
 }
@@ -496,9 +507,9 @@ func uploadResults(results []nistUploadResult, sessionID string, config *Config,
 // Vector Test Result files are JSON formatted with various objects and keys.
 // Define structs to read and process the files.
 type vectorResult struct {
-	Version    string      `json:"acvVersion,omitempty"`
-	Algorithm  string      `json:"algorithm,omitempty"`
-	ID         int         `json:"vsId,omitempty"`
+	Version   string `json:"acvVersion,omitempty"`
+	Algorithm string `json:"algorithm,omitempty"`
+	ID        int    `json:"vsId,omitempty"`
 	// Objects under testGroups can have various keys so use an empty interface.
 	Tests []map[string]interface{} `json:"testGroups,omitempty"`
 }
@@ -539,6 +550,35 @@ type nistUploadResult struct {
 	JSONResult []byte
 }
 
+// Processes test result and returns them in format to be uploaded.
+func processResultContent(previousResults []nistUploadResult, result []byte, sessionID string, filename string) []nistUploadResult {
+	var data []vectorResult
+	if err := json.Unmarshal(result, &data); err != nil {
+		// Assume file is not JSON. Log and continue to next file.
+		log.Printf("Failed to parse %q: %s", filename, err)
+		return previousResults
+	}
+
+	vectorSetID, err := getVectorSetID(data)
+	if err != nil {
+		log.Fatalf("failed to get VectorSetID: %s", err)
+	}
+	// uploadResult() uses acvp.Server whose write() function takes the
+	// JSON *object* payload and turns it into a JSON *array* adding
+	// {"acvVersion":"1.0"} as a top-level object. Since the result file is
+	// already in this format, the JSON provided to uploadResult() must be
+	// modified to have those aspects removed. In other words, only store only
+	// the vector test result JSON object (do not store a JSON array or
+	// acvVersion object).
+	vectorTestResult, err := getVectorResult(data)
+	if err != nil {
+		log.Fatalf("failed to get VectorResult: %s", err)
+	}
+	requestPath := fmt.Sprintf("/acvp/v1/testSessions/%s/vectorSets/%d", sessionID, vectorSetID)
+	newResult := nistUploadResult{URLPath: requestPath, JSONResult: vectorTestResult}
+	return append(previousResults, newResult)
+}
+
 // Uploads a results directory based on the directory name being the session id.
 // Non-JSON files are ignored and JSON files are assumed to be test results.
 // The vectorSetId is retrieved from the test result file.
@@ -559,36 +599,72 @@ func uploadResultsDirectory(directory string, config *Config, sessionTokensCache
 	for _, file := range files {
 		// Add contents of the result file to results.
 		filePath := filepath.Join(directory, file.Name())
-		in, err := ioutil.ReadFile(filePath)
+		content, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			log.Fatalf("Cannot open input: %s", err)
 		}
 
-		var data []vectorResult
-		if err := json.Unmarshal(in, &data); err != nil {
-			// Assume file is not JSON. Log and continue to next file.
-			log.Printf("Failed to parse %q: %s", filePath, err)
+		results = processResultContent(results, content, sessionID, filePath)
+	}
+
+	uploadResults(results, sessionID, config, sessionTokensCacheDir)
+}
+
+// Uploads results directory from GCS.
+// Similar to uploadResultsDirectory().
+func uploadResultsFromGcs(gcsBucket string, config *Config, sessionTokensCacheDir string) {
+	u, err := neturl.Parse(gcsBucket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bucket := u.Host
+	folder := trimLeadingSlash(addTrailingSlash(u.Path))
+	sessionID, err := getLastDigitDir(folder)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(ctx, time.Second*10)
+	defer cancel()
+
+	// Access bucket and identify all objects.
+	// Objects include the folder.
+	it := client.Bucket(bucket).Objects(ctx, &storage.Query{
+		Prefix:    folder,
+		Delimiter: "/",
+	})
+
+	var results []nistUploadResult
+	// Go through each object (noting GCS stores objects, not files)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		} else if err != nil {
+			log.Fatalf("Unable to read bucket: %s", err)
+		}
+		rc, err := client.Bucket(bucket).Object(attrs.Name).NewReader(ctx)
+		if err != nil {
+			log.Fatalf("unable to open object from bucket %q, object %q: %v", bucket, attrs.Name, err)
+			return
+		}
+		defer rc.Close()
+		content, err := ioutil.ReadAll(rc)
+		if err != nil {
+			log.Fatalf("unable to read contents of object %q: %v", attrs.Name, err)
+		}
+		if len(content) == 0 {
+			log.Printf("object (gs://%s/%s) is a \"folder\" or empty.", bucket, attrs.Name)
 			continue
 		}
 
-		vectorSetID, err := getVectorSetID(data)
-		if err != nil {
-			log.Fatalf("Failed to get VectorSetId: %s", err)
-		}
-		// uploadResult() uses acvp.Server whose write() function takes the
-		// JSON *object* payload and turns it into a JSON *array* adding
-		// {"acvVersion":"1.0"} as a top-level object. Since the result file is
-		// already in this format, the JSON provided to uploadResult() must be
-		// modified to have those aspects removed. In other words, only store only
-		// the vector test result JSON object (do not store a JSON array or
-		// acvVersion object).
-		vectorTestResult, err := getVectorResult(data)
-		if err != nil {
-			log.Fatalf("Failed to get VectorResult: %s", err)
-		}
-		requestPath := fmt.Sprintf("/acvp/v1/testSessions/%s/vectorSets/%d", sessionID, vectorSetID)
-		newResult := nistUploadResult{URLPath: requestPath, JSONResult: vectorTestResult}
-		results = append(results, newResult)
+		results = processResultContent(results, content, sessionID, attrs.Name)
 	}
 
 	uploadResults(results, sessionID, config, sessionTokensCacheDir)
@@ -656,18 +732,18 @@ func main() {
 		}
 	}
 	if resultFlagCount > 1 {
-		log.Fatalf("only one submit result action (-upload, -directory) is allowed at a time")
+		log.Fatalf("only one submit result action (-upload, -directory, -gcs) is allowed at a time")
 	} else if resultFlagCount == 1 {
 		if len(*jsonInputFile) > 0 {
-			log.Fatalf("submit result action (-upload, -directory) cannot be used with -json")
+			log.Fatalf("submit result action (-upload, -directory, -gcs) cannot be used with -json")
 		} else if len(*runFlag) > 0 {
-			log.Fatalf("submit result action (-upload, -directory) cannot be used with -run")
+			log.Fatalf("submit result action (-upload, -directory, -gcs) cannot be used with -run")
 		} else if len(*fetchFlag) > 0 {
-			log.Fatalf("submit result action (-upload, -directory) cannot be used with -fetch")
+			log.Fatalf("submit result action (-upload, -directory, -gcs) cannot be used with -fetch")
 		} else if len(*expectedOutFlag) > 0 {
-			log.Fatalf("submit result action (-upload, -directory) cannot be used with -expected-out")
+			log.Fatalf("submit result action (-upload, -directory, -gcs) cannot be used with -expected-out")
 		} else if *dumpRegcap {
-			log.Fatalf("submit result action (-upload, -directory) cannot be used with -regcap")
+			log.Fatalf("submit result action (-upload, -directory, -gcs) cannot be used with -regcap")
 		}
 	}
 
@@ -811,6 +887,10 @@ func main() {
 
 	if len(*uploadDirectory) > 0 {
 		uploadResultsDirectory(*uploadDirectory, &config, sessionTokensCacheDir)
+		return
+	}
+	if len(*uploadGcsDirectory) > 0 {
+		uploadResultsFromGcs(*uploadGcsDirectory, &config, sessionTokensCacheDir)
 		return
 	}
 

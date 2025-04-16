@@ -1,16 +1,16 @@
 // Copyright 2017 The BoringSSL Authors
 //
-// Permission to use, copy, modify, and/or distribute this software for any
-// purpose with or without fee is hereby granted, provided that the above
-// copyright notice and this permission notice appear in all copies.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
-// OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
-// CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 // delocate performs several transformations of textual assembly code. See
 // crypto/fipsmodule/FIPS.md for an overview.
@@ -28,8 +28,8 @@ import (
 	"strconv"
 	"strings"
 
-	"boringssl.googlesource.com/boringssl/util/ar"
-	"boringssl.googlesource.com/boringssl/util/fipstools/fipscommon"
+	"boringssl.googlesource.com/boringssl.git/util/ar"
+	"boringssl.googlesource.com/boringssl.git/util/fipstools/fipscommon"
 )
 
 // inputFile represents a textual assembly file.
@@ -195,7 +195,7 @@ func (d *delocation) processDirective(statement, directive *node32) (*node32, er
 		if len(args) < 1 {
 			return nil, errors.New("comm directive has no arguments")
 		}
-		d.bssAccessorsNeeded[demangle(args[0])] = args[0]
+		d.bssAccessorsNeeded[args[0]] = args[0]
 		d.writeNode(statement)
 
 	case "data":
@@ -203,6 +203,10 @@ func (d *delocation) processDirective(statement, directive *node32) (*node32, er
 		// and adding references to symbols within it to the code. We
 		// will have to work around this in the future.
 		return nil, errors.New(".data section found in module")
+
+	case "bss":
+		d.writeNode(statement)
+		return d.handleBSS(statement)
 
 	case "section":
 		section := args[0]
@@ -411,18 +415,13 @@ func (d *delocation) loadAarch64Address(statement *node32, targetReg string, sym
 		panic("non-zero offset for helper-based reference")
 	}
 
-	var helperFunc string
-	if symbol == "OPENSSL_armcap_P" {
-		helperFunc = ".LOPENSSL_armcap_P_addr"
-	} else {
-		// GOT helpers also dereference the GOT entry, thus the subsequent ldr
-		// instruction, which would normally do the dereferencing, needs to be
-		// dropped. GOT helpers have to include the dereference because the
-		// assembler doesn't support ":got_lo12:foo" offsets except in an ldr
-		// instruction.
-		d.gotExternalsNeeded[symbol] = struct{}{}
-		helperFunc = gotHelperName(symbol)
-	}
+	// GOT helpers also dereference the GOT entry, thus the subsequent ldr
+	// instruction, which would normally do the dereferencing, needs to be
+	// dropped. GOT helpers have to include the dereference because the
+	// assembler doesn't support ":got_lo12:foo" offsets except in an ldr
+	// instruction.
+	d.gotExternalsNeeded[symbol] = struct{}{}
+	helperFunc := gotHelperName(symbol)
 
 	// Clear the red-zone. I can't find a definitive answer about whether Linux
 	// Aarch64 includes a red-zone, but Microsoft has a 16-byte one and Apple a
@@ -969,37 +968,6 @@ Args:
 			symbol, offset, section, didChange, symbolIsLocal, memRef := d.parseMemRef(arg.up)
 			changed = didChange
 
-			if symbol == "OPENSSL_ia32cap_P" && section == "" {
-				if instructionName != "leaq" {
-					return nil, fmt.Errorf("non-leaq instruction %q referenced OPENSSL_ia32cap_P directly", instructionName)
-				}
-
-				if i != 0 || len(argNodes) != 2 || !d.isRIPRelative(memRef) || len(offset) > 0 {
-					return nil, fmt.Errorf("invalid OPENSSL_ia32cap_P reference in instruction %q", instructionName)
-				}
-
-				target := argNodes[1]
-				assertNodeType(target, ruleRegisterOrConstant)
-				reg := d.contents(target)
-
-				if !strings.HasPrefix(reg, "%r") {
-					return nil, fmt.Errorf("tried to load OPENSSL_ia32cap_P into %q, which is not a standard register.", reg)
-				}
-
-				changed = true
-
-				// Flag-altering instructions (i.e. addq) are going to be used so the
-				// flags need to be preserved.
-				wrappers = append(wrappers, saveFlags(d.output, false /* Red Zone not yet cleared */))
-
-				wrappers = append(wrappers, func(k func()) {
-					d.output.WriteString("\tleaq\tOPENSSL_ia32cap_addr_delta(%rip), " + reg + "\n")
-					d.output.WriteString("\taddq\t(" + reg + "), " + reg + "\n")
-				})
-
-				break Args
-			}
-
 			switch section {
 			case "":
 				if _, knownSymbol := d.symbols[symbol]; knownSymbol {
@@ -1142,15 +1110,7 @@ Args:
 					redzoneCleared = true
 				}
 
-				if symbol == "OPENSSL_ia32cap_P" {
-					// Flag-altering instructions (i.e. addq) are going to be used so the
-					// flags need to be preserved.
-					wrappers = append(wrappers, saveFlags(d.output, redzoneCleared))
-					wrappers = append(wrappers, func(k func()) {
-						d.output.WriteString("\tleaq\tOPENSSL_ia32cap_addr_delta(%rip), " + targetReg + "\n")
-						d.output.WriteString("\taddq\t(" + targetReg + "), " + targetReg + "\n")
-					})
-				} else if useGOT {
+				if useGOT {
 					wrappers = append(wrappers, d.loadFromGOT(d.output, targetReg, symbol, section, redzoneCleared))
 				} else {
 					wrappers = append(wrappers, func(k func()) {
@@ -1303,7 +1263,7 @@ func (d *delocation) handleBSS(statement *node32) (*node32, error) {
 				localSymbol := localTargetName(symbol)
 				d.output.WriteString(fmt.Sprintf("\n%s:\n", localSymbol))
 
-				d.bssAccessorsNeeded[demangle(symbol)] = localSymbol
+				d.bssAccessorsNeeded[symbol] = localSymbol
 			}
 
 		case ruleLabelContainingDirective:
@@ -1354,9 +1314,6 @@ func transform(w stringWriter, inputs []inputFile) error {
 	// checksums in .file directives. If it does so, then this script needs
 	// to match that behaviour otherwise warnings result.
 	fileDirectivesContainMD5 := false
-
-	// OPENSSL_ia32cap_get will be synthesized by this script.
-	symbols["OPENSSL_ia32cap_get"] = struct{}{}
 
 	for _, input := range inputs {
 		forEachPath(input.ast.up, func(node *node32) {
@@ -1503,12 +1460,6 @@ func transform(w stringWriter, inputs []inputFile) error {
 			})
 		}
 
-		writeAarch64Function(w, ".LOPENSSL_armcap_P_addr", func(w stringWriter) {
-			w.WriteString("\tadrp x0, OPENSSL_armcap_P\n")
-			w.WriteString("\tadd x0, x0, :lo12:OPENSSL_armcap_P\n")
-			w.WriteString("\tret\n")
-		})
-
 	case x86_64:
 		externalNames := sortedSet(d.gotExternalsNeeded)
 		for _, name := range externalNames {
@@ -1524,19 +1475,6 @@ func transform(w stringWriter, inputs []inputFile) error {
 			w.WriteString("\t.long " + symbol + "@" + section + "\n")
 			w.WriteString("\t.long 0\n")
 		}
-
-		w.WriteString(".type OPENSSL_ia32cap_get, @function\n")
-		w.WriteString(".globl OPENSSL_ia32cap_get\n")
-		w.WriteString(localTargetName("OPENSSL_ia32cap_get") + ":\n")
-		w.WriteString("OPENSSL_ia32cap_get:\n")
-		w.WriteString("\tleaq OPENSSL_ia32cap_P(%rip), %rax\n")
-		w.WriteString("\tret\n")
-
-		w.WriteString(".extern OPENSSL_ia32cap_P\n")
-		w.WriteString(".type OPENSSL_ia32cap_addr_delta, @object\n")
-		w.WriteString(".size OPENSSL_ia32cap_addr_delta, 8\n")
-		w.WriteString("OPENSSL_ia32cap_addr_delta:\n")
-		w.WriteString(".quad OPENSSL_ia32cap_P-OPENSSL_ia32cap_addr_delta\n")
 
 		if d.gotDeltaNeeded {
 			w.WriteString(".Lboringssl_got_delta:\n")
@@ -1805,48 +1743,11 @@ func localTargetName(name string) string {
 
 func isSynthesized(symbol string) bool {
 	return strings.HasSuffix(symbol, "_bss_get") ||
-		symbol == "OPENSSL_ia32cap_get" ||
 		strings.HasPrefix(symbol, "BORINGSSL_bcm_text_")
 }
 
 func redirectorName(symbol string) string {
 	return "bcm_redirector_" + symbol
-}
-
-// Optionally demangle C++ local variable names.
-func demangle(symbol string) string {
-	if !strings.HasPrefix(symbol, "_Z") {
-		return symbol
-	}
-
-	// The names must have the form "_ZL", followed by the length of the name
-	// in base 10, followed by the name.
-	if !strings.HasPrefix(symbol, "_ZL") {
-		panic("malformed symbol: starts with _Z but not _ZL")
-	}
-
-	if len(symbol) < 4 {
-		panic("malformed symbol: too short")
-	}
-
-	pos := 3
-	for pos < len(symbol) && '0' <= symbol[pos] && symbol[pos] <= '9' {
-		pos++
-	}
-	if pos == 3 {
-		panic("malformed symbol: no length digits")
-	}
-
-	length, err := strconv.Atoi(symbol[3:pos])
-	if err != nil {
-		panic("malformed symbol: invalid length")
-	}
-
-	if len(symbol[pos:]) != length {
-		panic("malformed symbol: length mismatch")
-	}
-
-	return symbol[pos:]
 }
 
 // sectionType returns the type of a section. I.e. a section called “.text.foo”

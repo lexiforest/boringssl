@@ -1,13 +1,18 @@
-/*
- * Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
- * Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
- * Copyright 2005 Nokia. All rights reserved.
- *
- * Licensed under the OpenSSL license (the "License").  You may not use
- * this file except in compliance with the License.  You can obtain a copy
- * in the file LICENSE in the source distribution or at
- * https://www.openssl.org/source/license.html
- */
+// Copyright 1995-2016 The OpenSSL Project Authors. All Rights Reserved.
+// Copyright (c) 2002, Oracle and/or its affiliates. All rights reserved.
+// Copyright 2005 Nokia. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #ifndef OPENSSL_HEADER_SSL_H
 #define OPENSSL_HEADER_SSL_H
@@ -769,8 +774,6 @@ OPENSSL_EXPORT void SSL_CTX_set0_buffer_pool(SSL_CTX *ctx,
 // - Whether the peer supports the signature algorithms in the certificate chain
 // - Whether the a server certificate is compatible with the server_name
 //   extension (SNI)
-// - Whether the peer supports the certificate authority that issued the
-//   certificate
 //
 // Credentials may be configured before the handshake or dynamically in the
 // early callback (see |SSL_CTX_set_select_certificate_cb|) and certificate
@@ -833,6 +836,25 @@ OPENSSL_EXPORT int SSL_CREDENTIAL_set1_ocsp_response(SSL_CREDENTIAL *cred,
 // on success and zero on error.
 OPENSSL_EXPORT int SSL_CREDENTIAL_set1_signed_cert_timestamp_list(
     SSL_CREDENTIAL *cred, CRYPTO_BUFFER *sct_list);
+
+// SSL_CREDENTIAL_set_must_match_issuer configures whether |cred| should check
+// if the peer supports the certificate chain's issuer.
+//
+// If |match| is non-zero, |cred| will only be applicable when the certificate
+// chain is issued by some CA requested by the peer, e.g. in the
+// certificate_authorities extension. This can be used for certificate chains
+// that may not be usable by all peers, e.g. chains with fewer cross-signs or
+// issued from a newer CA.
+//
+// If |match| is zero (default), |cred| will not be conditioned on the peer's
+// requested CAs. This can be used for certificate chains that are assumed to be
+// usable by most peers.
+//
+// The credential list is tried in order, so more specific credentials that
+// enable issuer matching should generally be ordered before less specific
+// credentials that do not.
+OPENSSL_EXPORT void SSL_CREDENTIAL_set_must_match_issuer(SSL_CREDENTIAL *cred,
+                                                         int match);
 
 // SSL_CTX_add1_credential appends |cred| to |ctx|'s credential list. It returns
 // one on success and zero on error. The credential list is maintained in order
@@ -1142,17 +1164,29 @@ OPENSSL_EXPORT const EVP_MD *SSL_get_signature_algorithm_digest(
 OPENSSL_EXPORT int SSL_is_signature_algorithm_rsa_pss(uint16_t sigalg);
 
 // SSL_CTX_set_signing_algorithm_prefs configures |ctx| to use |prefs| as the
-// preference list when signing with |ctx|'s private key. It returns one on
-// success and zero on error. |prefs| should not include the internal-only value
-// |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+// preference list when signing with |ctx|'s private key in TLS 1.2 and up. It
+// returns one on success and zero on error. |prefs| should not include the
+// internal-only TLS 1.0 value |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+//
+// This setting is not used in TLS 1.0 and 1.1. Those protocols always sign a
+// hardcoded algorithm (an MD5/SHA-1 concatenation for RSA, and SHA-1 for
+// ECDSA). BoringSSL will use those algorithms if and only if those versions are
+// used. To disable them, set the minimum version to TLS 1.2 (default) or
+// higher.
 OPENSSL_EXPORT int SSL_CTX_set_signing_algorithm_prefs(SSL_CTX *ctx,
                                                        const uint16_t *prefs,
                                                        size_t num_prefs);
 
 // SSL_set_signing_algorithm_prefs configures |ssl| to use |prefs| as the
-// preference list when signing with |ssl|'s private key. It returns one on
-// success and zero on error. |prefs| should not include the internal-only value
-// |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+// preference list when signing with |ssl|'s private key in TLS 1.2 and up. It
+// returns one on success and zero on error. |prefs| should not include the
+// internal-only TLS 1.0 value |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+//
+// This setting is not used in TLS 1.0 and 1.1. Those protocols always sign a
+// hardcoded algorithm (an MD5/SHA-1 concatenation for RSA, and SHA-1 for
+// ECDSA). BoringSSL will use those algorithms if and only if those versions are
+// used. To disable them, set the minimum version to TLS 1.2 (default) or
+// higher.
 OPENSSL_EXPORT int SSL_set_signing_algorithm_prefs(SSL *ssl,
                                                    const uint16_t *prefs,
                                                    size_t num_prefs);
@@ -1382,24 +1416,6 @@ OPENSSL_EXPORT void SSL_CTX_set_private_key_method(
 // credential-specific state, such as a handle to the private key.
 OPENSSL_EXPORT int SSL_CREDENTIAL_set_private_key_method(
     SSL_CREDENTIAL *cred, const SSL_PRIVATE_KEY_METHOD *key_method);
-
-// SSL_CREDENTIAL_set_must_match_issuer sets the flag that this credential
-// should be considered only when it matches a peer request for a particular
-// issuer via a negotiation mechanism (such as the certificate_authorities
-// extension).
-OPENSSL_EXPORT void SSL_CREDENTIAL_set_must_match_issuer(SSL_CREDENTIAL *cred);
-
-// SSL_CREDENTIAL_clear_must_match_issuer clears the flag requiring issuer
-// matching, indicating this credential should be considered regardless of peer
-// issuer matching requests. (This is the default).
-OPENSSL_EXPORT void SSL_CREDENTIAL_clear_must_match_issuer(
-    SSL_CREDENTIAL *cred);
-
-// SSL_CREDENTIAL_must_match_issuer returns the value of the flag indicating
-// that this credential should be considered only when it matches a peer request
-// for a particular issuer via a negotiation mechanism (such as the
-// certificate_authorities extension).
-OPENSSL_EXPORT int SSL_CREDENTIAL_must_match_issuer(const SSL_CREDENTIAL *cred);
 
 // SSL_can_release_private_key returns one if |ssl| will no longer call into the
 // private key and zero otherwise. If the function returns one, the caller can
@@ -1788,10 +1804,11 @@ OPENSSL_EXPORT int SSL_session_reused(const SSL *ssl);
 // renegotiation (RFC 5746) or TLS 1.3. Otherwise, it returns zero.
 OPENSSL_EXPORT int SSL_get_secure_renegotiation_support(const SSL *ssl);
 
-// SSL_export_keying_material exports a value derived from the master secret, as
-// specified in RFC 5705. It writes |out_len| bytes to |out| given a label and
-// optional context. (Since a zero length context is allowed, the |use_context|
-// flag controls whether a context is included.)
+// SSL_export_keying_material exports a connection-specific secret from |ssl|,
+// as specified in RFC 5705. It writes |out_len| bytes to |out| given a label
+// and optional context. If |use_context| is zero, the |context| parameter is
+// ignored. Prior to TLS 1.3, using a zero-length context and using no context
+// would give different output.
 //
 // It returns one on success and zero otherwise.
 OPENSSL_EXPORT int SSL_export_keying_material(
@@ -2570,10 +2587,6 @@ OPENSSL_EXPORT int SSL_get_negotiated_group(const SSL *ssl);
 // with |SSL_VERIFY_PEER|, otherwise it won't work.
 #define SSL_VERIFY_FAIL_IF_NO_PEER_CERT 0x02
 
-// SSL_VERIFY_PEER_IF_NO_OBC configures a server to request a client certificate
-// if and only if Channel ID is not negotiated.
-#define SSL_VERIFY_PEER_IF_NO_OBC 0x04
-
 // SSL_CTX_set_verify configures certificate verification behavior. |mode| is
 // one of the |SSL_VERIFY_*| values defined above. |callback| should be NULL.
 //
@@ -2849,27 +2862,44 @@ OPENSSL_EXPORT int SSL_set0_verify_cert_store(SSL *ssl, X509_STORE *store);
 OPENSSL_EXPORT int SSL_set1_verify_cert_store(SSL *ssl, X509_STORE *store);
 
 // SSL_CTX_set_verify_algorithm_prefs configures |ctx| to use |prefs| as the
-// preference list when verifying signatures from the peer's long-term key. It
-// returns one on zero on error. |prefs| should not include the internal-only
-// value |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+// preference list when verifying signatures from the peer's long-term key in
+// TLS 1.2 and up. It returns one on zero on error. |prefs| should not include
+// the internal-only TLS 1.0 value |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+//
+// This setting is not used in TLS 1.0 and 1.1. Those protocols always sign a
+// hardcoded algorithm (an MD5/SHA-1 concatenation for RSA, and SHA-1 for
+// ECDSA). BoringSSL will accept those algorithms if and only if those versions
+// are used. To disable them, set the minimum version to TLS 1.2 (default) or
+// higher.
 OPENSSL_EXPORT int SSL_CTX_set_verify_algorithm_prefs(SSL_CTX *ctx,
                                                       const uint16_t *prefs,
                                                       size_t num_prefs);
 
 // SSL_set_verify_algorithm_prefs configures |ssl| to use |prefs| as the
-// preference list when verifying signatures from the peer's long-term key. It
-// returns one on zero on error. |prefs| should not include the internal-only
-// value |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+// preference list when verifying signatures from the peer's long-term key in
+// TLS 1.2 and up. It returns one on zero on error. |prefs| should not include
+// the internal-only TLS 1.0 value |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
+//
+// This setting is not used in TLS 1.0 and 1.1. Those protocols always sign a
+// hardcoded algorithm (an MD5/SHA-1 concatenation for RSA, and SHA-1 for
+// ECDSA). BoringSSL will accept those algorithms if and only if those versions
+// are used. To disable them, set the minimum version to TLS 1.2 (default) or
+// higher.
 OPENSSL_EXPORT int SSL_set_verify_algorithm_prefs(SSL *ssl,
                                                   const uint16_t *prefs,
                                                   size_t num_prefs);
 
 
-// Client certificate CA list.
+// Certificate authorities.
 //
-// When requesting a client certificate, a server may advertise a list of
-// certificate authorities which are accepted. These functions may be used to
-// configure this list.
+// TLS implementations can send a list of supported certificate authorities to
+// guide the peer in selecting a certificate. This was originally defined for
+// servers requesting client certificates, but TLS 1.3 generalized it to server
+// certificates with the certificate_authorities extension.
+//
+// The following functions can be used to configure and query this list. They do
+// not directly impact certificate verification, only the list of certificate
+// authorities sent to the peer.
 
 // SSL_set_client_CA_list sets |ssl|'s client certificate CA list to
 // |name_list|. It takes ownership of |name_list|.
@@ -3497,6 +3527,120 @@ OPENSSL_EXPORT SSL_CREDENTIAL *SSL_CREDENTIAL_new_delegated(void);
 // the end-entity certificate, as described in RFC 9345.
 OPENSSL_EXPORT int SSL_CREDENTIAL_set1_delegated_credential(
     SSL_CREDENTIAL *cred, CRYPTO_BUFFER *dc);
+
+
+// Password Authenticated Key Exchange (PAKE).
+//
+// Password Authenticated Key Exchange protocols allow client and server to
+// mutually authenticate one another using knowledge of a password or other
+// low-entropy secret. While the TLS 1.3 pre-shared key (PSK) mechanism can
+// authenticate a high-entropy secret, it cannot be used with low-entropy
+// secrets as the PSK binder values can be used to mount a dictionary attack on
+// a low-entropy PSK. Using TLS 1.3 with a PAKE limits an attacker to confirming
+// one password guess per handshake attempt.
+//
+// WARNING: The PAKE mode in TLS is not a general-purpose authentication scheme.
+// As the underlying secret is still low-entropy, callers must limit brute force
+// attacks across multiple connections, especially in multi-connection protocols
+// such as HTTP. The |error_limit| and |rate_limit| parameters in the functions
+// below may be used to implement this, provided the same |SSL_CREDENTIAL|
+// object is used across connections. Applications using multiple connections
+// should use the PAKE credential only once to authenticate a high-entropy
+// secret, e.g. exporting a PSK from |SSL_export_keying_material|, and use the
+// high-entropy secret for subsequent connections.
+//
+// TODO(crbug.com/369963041): Implement RFC 9258 so one can actually do that.
+//
+// WARNING: PAKE support in TLS is still experimental and may change as the
+// standard evolves. See
+// https://chris-wood.github.io/draft-bmw-tls-pake13/draft-bmw-tls-pake13.html
+//
+// Currently, only the SPAKE2PLUS_V1 named PAKE algorithm is implemented; see
+// https://chris-wood.github.io/draft-bmw-tls-pake13/draft-bmw-tls-pake13.html#section-8.1.
+
+// SSL_PAKE_SPAKE2PLUSV1 is the codepoint for SPAKE2PLUS_V1. See
+// https://chris-wood.github.io/draft-bmw-tls-pake13/draft-bmw-tls-pake13.html#name-named-pake-registry.
+#define SSL_PAKE_SPAKE2PLUSV1 0x7d96
+
+// SSL_spake2plusv1_register computes the values that the client (w0,
+// w1) and server (w0, registration_record) require to run SPAKE2+. These values
+// can be used when calling |SSL_CREDENTIAL_new_spake2plusv1_client| and
+// |SSL_CREDENTIAL_new_spake2plusv1_server|. The client and server identities
+// must match the values passed to those functions.
+//
+// Returns one on success and zero on error.
+OPENSSL_EXPORT int SSL_spake2plusv1_register(
+    uint8_t out_w0[32], uint8_t out_w1[32], uint8_t out_registration_record[65],
+    const uint8_t *password, size_t password_len,
+    const uint8_t *client_identity, size_t client_identity_len,
+    const uint8_t *server_identity, size_t server_identity_len);
+
+// SSL_CREDENTIAL_new_spake2plusv1_client creates a new |SSL_CREDENTIAL| that
+// authenticates using SPAKE2+. It is to be used with a TLS client.
+//
+// The |context|, |client_identity|, and |server_identity| fields serve to
+// identity the SPAKE2+ settings and both sides of a connection must agree on
+// these values. If |context| is |NULL|, a default value will be used.
+//
+// |error_limit| is the number of failed handshakes allowed on the credential.
+// After the limit is reached, using the credential will fail. Ideally this
+// value is set to 1. Setting it to a higher value allows an attacker to have
+// that many attempts at guessing the password using this |SSL_CREDENTIAL|.
+// (Assuming that multiple TLS connections are allowed.)
+//
+// |w0| and |w1| come from calling |SSL_spake2plusv1_register|.
+//
+// Unlike most |SSL_CREDENTIAL|s, PAKE client credentials must be the only
+// credential configured on the connection. BoringSSL does not currently support
+// configuring multiple PAKE credentials as a client, or configuring a mix of
+// PAKE and non-PAKE credentials. Once a PAKE credential is configured, the
+// connection will require the server to authenticate with the same secret, so a
+// successful connection then implies that the server supported the PAKE and
+// knew the password.
+OPENSSL_EXPORT SSL_CREDENTIAL *SSL_CREDENTIAL_new_spake2plusv1_client(
+    const uint8_t *context, size_t context_len, const uint8_t *client_identity,
+    size_t client_identity_len, const uint8_t *server_identity,
+    size_t server_identity_len, uint32_t error_limit, const uint8_t *w0,
+    size_t w0_len, const uint8_t *w1, size_t w1_len);
+
+// SSL_CREDENTIAL_new_spake2plusv1_server creates a new |SSL_CREDENTIAL| that
+// authenticates using SPAKE2+. It is to be used with a TLS server.
+//
+// The |context|, |client_identity|, and |server_identity| fields serve to
+// identity the SPAKE2+ settings and both sides of a connection must agree on
+// these values. If |context| is |NULL|, a default value will be used.
+//
+// |rate_limit| is the number of failed or unfinished handshakes allowed on the
+// credential. After the limit is reached, using the credential will fail.
+// Ideally this value is set to 1. Setting it to a higher value allows an
+// attacker to have that many attempts at guessing the password using this
+// |SSL_CREDENTIAL|. (Assuming that multiple TLS connections are allowed.)
+//
+// WARNING: |rate_limit| differs from the client's |error_limit| parameter.
+// Server PAKE credentials must temporarily deduct incomplete handshakes from
+// the limit, until the peer completes the handshake correctly. Thus
+// applications use that multiple connections in parallel may need a higher
+// limit, and thus higher attacker exposure, to avoid failures. Such
+// applications should instead use one PAKE-based connection to established a
+// high-entropy secret (e.g. with |SSL_export_keying_material|) instead of
+// repeating the PAKE exchange for each connection.
+//
+// |w0| and |registration_record| come from calling |SSL_spake2plusv1_register|,
+// which may be computed externally so that the server does not know the
+// password, or a password-equivalent secret.
+//
+// A server wishing to support a PAKE should install one of these credentials.
+// It is also possible to install certificate-based credentials, in which case
+// both PAKE and non-PAKE clients can be supported. However, if only a PAKE
+// credential is installed then the server knows that any successfully-connected
+// clients also knows the password. Otherwise, the server must be careful to
+// inspect the credential used for a connection before assuming that.
+OPENSSL_EXPORT SSL_CREDENTIAL *SSL_CREDENTIAL_new_spake2plusv1_server(
+    const uint8_t *context, size_t context_len, const uint8_t *client_identity,
+    size_t client_identity_len, const uint8_t *server_identity,
+    size_t server_identity_len, uint32_t rate_limit, const uint8_t *w0,
+    size_t w0_len, const uint8_t *registration_record,
+    size_t registration_record_len);
 
 
 // QUIC integration.
@@ -4791,23 +4935,18 @@ OPENSSL_EXPORT int SSL_used_hello_retry_request(const SSL *ssl);
 // https://bugs.openjdk.java.net/browse/JDK-8213202
 OPENSSL_EXPORT void SSL_set_jdk11_workaround(SSL *ssl, int enable);
 
-// SSL_set_check_client_certificate_type configures whether the client, in
-// TLS 1.2 and below, will check its certificate against the server's requested
-// certificate types.
+// SSL_parse_client_hello decodes a ClientHello structure from |len| bytes in
+// |in|. On success, it returns one and writes the result to |*out|. Otherwise,
+// it returns zero. |ssl| will be saved into |*out| and determines how the
+// ClientHello is parsed, notably TLS vs DTLS. The fields in |*out| will alias
+// |in| and are only valid as long as |in| is valid and unchanged.
 //
-// By default, this option is enabled. If disabled, certificate selection within
-// the library may not function correctly. This flag is provided temporarily in
-// case of compatibility issues. It will be removed sometime after June 2024.
-OPENSSL_EXPORT void SSL_set_check_client_certificate_type(SSL *ssl, int enable);
-
-// SSL_set_check_ecdsa_curve configures whether the server, in TLS 1.2 and
-// below, will check its certificate against the client's supported ECDSA
-// curves.
-//
-// By default, this option is enabled. If disabled, certificate selection within
-// the library may not function correctly. This flag is provided temporarily in
-// case of compatibility issues. It will be removed sometime after June 2024.
-OPENSSL_EXPORT void SSL_set_check_ecdsa_curve(SSL *ssl, int enable);
+// |in| should contain just the ClientHello structure (RFC 8446 and RFC 9147),
+// excluding the handshake header and already reassembled from record layer.
+// That is, |in| should begin with the legacy_version field, not the
+// client_hello HandshakeType constant or the handshake ContentType constant.
+OPENSSL_EXPORT int SSL_parse_client_hello(const SSL *ssl, SSL_CLIENT_HELLO *out,
+                                          const uint8_t *in, size_t len);
 
 
 // Deprecated functions.
@@ -5587,7 +5726,7 @@ enum ssl_compliance_policy_t BORINGSSL_ENUM_INT {
   // other than by the supported signature algorithms. But WPA3's "192-bit"
   // mode requires at least P-384 or 3072-bit along the chain. The caller must
   // enforce this themselves on the verified chain using functions such as
-  // `X509_STORE_CTX_get0_chain`.
+  // |X509_STORE_CTX_get0_chain|.
   //
   // Note that this setting is less secure than the default. The
   // implementation risks of using a more obscure primitive like P-384
@@ -5647,7 +5786,7 @@ OPENSSL_EXPORT enum ssl_compliance_policy_t SSL_get_compliance_policy(
 //
 // See PORTING.md in the BoringSSL source tree for a table of corresponding
 // functions.
-// https://boringssl.googlesource.com/boringssl/+/master/PORTING.md#Replacements-for-values
+// https://boringssl.googlesource.com/boringssl/+/main/PORTING.md#Replacements-for-values
 
 #define DTLS_CTRL_GET_TIMEOUT doesnt_exist
 #define DTLS_CTRL_HANDLE_TIMEOUT doesnt_exist
@@ -6109,6 +6248,11 @@ BSSL_NAMESPACE_END
 #define SSL_R_INVALID_OUTER_EXTENSION 320
 #define SSL_R_INCONSISTENT_ECH_NEGOTIATION 321
 #define SSL_R_INVALID_ALPS_CODEPOINT 322
+#define SSL_R_NO_MATCHING_ISSUER 323
+#define SSL_R_INVALID_SPAKE2PLUSV1_VALUE 324
+#define SSL_R_PAKE_EXHAUSTED 325
+#define SSL_R_PEER_PAKE_MISMATCH 326
+#define SSL_R_UNSUPPORTED_CREDENTIAL_LIST 327
 #define SSL_R_SSLV3_ALERT_CLOSE_NOTIFY 1000
 #define SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE 1010
 #define SSL_R_SSLV3_ALERT_BAD_RECORD_MAC 1020
@@ -6143,5 +6287,6 @@ BSSL_NAMESPACE_END
 #define SSL_R_TLSV1_ALERT_CERTIFICATE_REQUIRED 1116
 #define SSL_R_TLSV1_ALERT_NO_APPLICATION_PROTOCOL 1120
 #define SSL_R_TLSV1_ALERT_ECH_REQUIRED 1121
+#define SSL_R_PAKE_AND_KEY_SHARE_NOT_ALLOWED 1122
 
 #endif  // OPENSSL_HEADER_SSL_H

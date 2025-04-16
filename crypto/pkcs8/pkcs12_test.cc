@@ -1,16 +1,16 @@
-/* Copyright 2014 The BoringSSL Authors
- *
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
- * SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION
- * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
+// Copyright 2014 The BoringSSL Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #include <gtest/gtest.h>
 
@@ -396,67 +396,67 @@ static void TestRoundTrip(const char *password, const char *name,
 }
 
 TEST(PKCS12Test, RoundTrip) {
-  TestRoundTrip(kPassword, nullptr /* no name */,
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)}, 0, 0, 0, 0);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, 0, 0, 0, 0);
 
   // Test some Unicode.
-  TestRoundTrip(kPassword, "Hello, 世界!",
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)}, 0, 0, 0, 0);
-  TestRoundTrip(kUnicodePassword, nullptr /* no name */,
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)}, 0, 0, 0, 0);
+  TestRoundTrip(kPassword, "Hello, 世界!", kTestKey, kTestCert, {kTestCert2}, 0,
+                0, 0, 0);
+  TestRoundTrip(kUnicodePassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, 0, 0, 0, 0);
 
   // Test various fields being missing.
-  TestRoundTrip(kPassword, nullptr /* no name */, {} /* no key */,
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)}, 0, 0, 0, 0);
-  TestRoundTrip(
-      kPassword, nullptr /* no name */, bssl::Span<const uint8_t>(kTestKey),
-      bssl::Span<const uint8_t>(kTestCert), {} /* no chain */, 0, 0, 0, 0);
-  TestRoundTrip(kPassword, nullptr /* no name */,
-                bssl::Span<const uint8_t>(kTestKey), {} /* no leaf */,
+  TestRoundTrip(kPassword, nullptr /* no name */, {} /* no key */, kTestCert,
+                {kTestCert2}, 0, 0, 0, 0);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {} /* no chain */, 0, 0, 0, 0);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, {} /* no leaf */,
                 {} /* no chain */, 0, 0, 0, 0);
 
   // Test encryption parameters.
-  TestRoundTrip(
-      kPassword, nullptr /* no name */, bssl::Span<const uint8_t>(kTestKey),
-      bssl::Span<const uint8_t>(kTestCert),
-      {bssl::Span<const uint8_t>(kTestCert2)}, NID_pbe_WithSHA1And40BitRC2_CBC,
-      NID_pbe_WithSHA1And40BitRC2_CBC, 100, 100);
-  TestRoundTrip(
-      kPassword, nullptr /* no name */, bssl::Span<const uint8_t>(kTestKey),
-      bssl::Span<const uint8_t>(kTestCert),
-      {bssl::Span<const uint8_t>(kTestCert2)}, NID_pbe_WithSHA1And128BitRC4,
-      NID_pbe_WithSHA1And128BitRC4, 100, 100);
-  TestRoundTrip(kPassword, nullptr /* no name */,
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)},
-                NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_pbe_WithSHA1And40BitRC2_CBC,
+                NID_pbe_WithSHA1And40BitRC2_CBC, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_pbe_WithSHA1And128BitRC4,
+                NID_pbe_WithSHA1And128BitRC4, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
                 NID_pbe_WithSHA1And3_Key_TripleDES_CBC, 100, 100);
 
+  // PBES2 ciphers.
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_rc2_cbc, NID_rc2_cbc, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_des_ede3_cbc, NID_des_ede3_cbc, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_aes_128_cbc, NID_aes_128_cbc, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_aes_192_cbc, NID_aes_192_cbc, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_aes_256_cbc, NID_aes_256_cbc, 100, 100);
+
+  // Mix and match.
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_pbe_WithSHA1And40BitRC2_CBC,
+                NID_pbe_WithSHA1And3_Key_TripleDES_CBC, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
+                NID_aes_256_cbc, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_aes_256_cbc,
+                NID_pbe_WithSHA1And3_Key_TripleDES_CBC, 100, 100);
+  TestRoundTrip(kPassword, nullptr /* no name */, kTestKey, kTestCert,
+                {kTestCert2}, NID_aes_128_cbc, NID_aes_256_cbc, 100, 100);
+
   // Test unencrypted and partially unencrypted PKCS#12 files.
-  TestRoundTrip(kPassword, /*name=*/nullptr,
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)},
+  TestRoundTrip(kPassword, /*name=*/nullptr, kTestKey, kTestCert, {kTestCert2},
                 /*key_nid=*/-1,
                 /*cert_nid=*/-1, /*iterations=*/100, /*mac_iterations=*/100);
-  TestRoundTrip(kPassword, /*name=*/nullptr,
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)},
+  TestRoundTrip(kPassword, /*name=*/nullptr, kTestKey, kTestCert, {kTestCert2},
                 /*key_nid=*/NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
                 /*cert_nid=*/-1, /*iterations=*/100, /*mac_iterations=*/100);
-  TestRoundTrip(kPassword, /*name=*/nullptr,
-                bssl::Span<const uint8_t>(kTestKey),
-                bssl::Span<const uint8_t>(kTestCert),
-                {bssl::Span<const uint8_t>(kTestCert2)},
+  TestRoundTrip(kPassword, /*name=*/nullptr, kTestKey, kTestCert, {kTestCert2},
                 /*key_nid=*/-1,
                 /*cert_nid=*/NID_pbe_WithSHA1And3_Key_TripleDES_CBC,
                 /*iterations=*/100, /*mac_iterations=*/100);
