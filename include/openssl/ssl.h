@@ -1637,6 +1637,12 @@ OPENSSL_EXPORT size_t SSL_get_all_standard_cipher_names(const char **out,
 OPENSSL_EXPORT int SSL_CTX_set_strict_cipher_list(SSL_CTX *ctx,
                                                   const char *str);
 
+// curl-impersonate: set the extension order by given string
+OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
+
+// curl-impersonate
+OPENSSL_EXPORT int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled);
+
 // SSL_CTX_set_cipher_list configures the cipher list for |ctx|, evaluating
 // |str| as a cipher string. It returns one on success and zero on failure.
 //
@@ -2451,6 +2457,8 @@ OPENSSL_EXPORT size_t SSL_CTX_get_num_tickets(const SSL_CTX *ctx);
 #define SSL_GROUP_X25519 29
 #define SSL_GROUP_X25519_MLKEM768 0x11ec
 #define SSL_GROUP_X25519_KYBER768_DRAFT00 0x6399
+#define SSL_GROUP_FFDHE2048 0x0100
+#define SSL_GROUP_FFDHE3072 0x0101
 
 // SSL_CTX_set1_group_ids sets the preferred groups for |ctx| to |group_ids|.
 // Each element of |group_ids| should be one of the |SSL_GROUP_*| constants. It
@@ -4754,6 +4762,12 @@ OPENSSL_EXPORT void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled);
 // permute extensions. For now, this is only implemented for the ClientHello.
 OPENSSL_EXPORT void SSL_set_permute_extensions(SSL *ssl, int enabled);
 
+// curl-impersonate
+OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
+
+// curl-impersonate
+OPENSSL_EXPORT int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled);
+
 // SSL_max_seal_overhead returns the maximum overhead, in bytes, of sealing a
 // record with |ssl|.
 OPENSSL_EXPORT size_t SSL_max_seal_overhead(const SSL *ssl);
@@ -5075,6 +5089,33 @@ OPENSSL_EXPORT int SSL_CTX_set1_sigalgs_list(SSL_CTX *ctx, const char *str);
 // prefer |SSL_CTX_set_signing_algorithm_prefs| because it's clearer and it's
 // more convenient to codesearch for specific algorithm values.
 OPENSSL_EXPORT int SSL_set1_sigalgs_list(SSL *ssl, const char *str);
+
+// curl-impersoante:
+// SSL_CTX_set_delegated_credentials sets the set of signature algorithms supported
+// by the client.
+OPENSSL_EXPORT int SSL_CTX_set_delegated_credentials(SSL_CTX *ctx, const char *str);
+
+// curl-impersoante:
+// SSL_set_record_size_limit configures whether sockets on |ssl| should
+// send record size limit extension.
+OPENSSL_EXPORT void SSL_set_record_size_limit(SSL *ssl, uint16_t limit);
+
+// curl-impersoante:
+// SSL_CTX_set_record_size_limit configures whether sockets on |ctx| should
+// send record size limit extension.
+OPENSSL_EXPORT void SSL_CTX_set_record_size_limit(SSL_CTX *ctx, uint16_t limit);
+
+// curl-imperonsate:
+// SSL_set_key_shares_limit configures whether sockets on |ssl| should
+// send three key shares.
+OPENSSL_EXPORT void SSL_set_key_shares_limit(SSL *ssl, uint8_t limit);
+
+// curl-impersonate:
+// SSL_CTX_set_key_shares_limit configures whether sockets on |ctx| should
+// send three key shares.
+OPENSSL_EXPORT void SSL_CTX_set_key_shares_limit(SSL_CTX *ctx, uint8_t limit);
+
+
 
 #define SSL_set_app_data(s, arg) (SSL_set_ex_data(s, 0, (char *)(arg)))
 #define SSL_get_app_data(s) (SSL_get_ex_data(s, 0))
@@ -5454,6 +5495,8 @@ OPENSSL_EXPORT int SSL_CTX_set_tlsext_status_arg(SSL_CTX *ctx, void *arg);
 #define SSL_CURVE_SECP384R1 SSL_GROUP_SECP384R1
 #define SSL_CURVE_SECP521R1 SSL_GROUP_SECP521R1
 #define SSL_CURVE_X25519 SSL_GROUP_X25519
+#define SSL_CURVE_FFDHE2048 SSL_GROUP_FFDHE2048
+#define SSL_CURVE_FFDHE3072 SSL_GROUP_FFDHE3072
 #define SSL_CURVE_X25519_KYBER768_DRAFT00 SSL_GROUP_X25519_KYBER768_DRAFT00
 
 // SSL_get_curve_id calls |SSL_get_group_id|.

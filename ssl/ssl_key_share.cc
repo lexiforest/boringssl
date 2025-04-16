@@ -384,6 +384,8 @@ constexpr NamedGroup kNamedGroups[] = {
     {NID_X25519Kyber768Draft00, SSL_GROUP_X25519_KYBER768_DRAFT00,
      "X25519Kyber768Draft00", ""},
     {NID_X25519MLKEM768, SSL_GROUP_X25519_MLKEM768, "X25519MLKEM768", ""},
+    {NID_ffdhe2048, SSL_CURVE_FFDHE2048, "dhe2048", "ffdhe2048"},
+    {NID_ffdhe3072, SSL_CURVE_FFDHE3072, "dhe3072", "ffdhe3072"},
 };
 
 }  // namespace

@@ -2114,7 +2114,15 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
   SSL *const ssl = hs->ssl;
   hs->key_shares[0].reset();
   hs->key_shares[1].reset();
+  hs->key_shares[2].reset();
   hs->key_share_bytes.Reset();
+  // If key_shares_limit is set, use it. Otherwise, use the default of 2.
+  const uint8_t key_shares_limit = hs->ssl->config->key_shares_limit;
+  // The key_shares_limit is set by the user, so it is a custom value.
+  const bool is_custom = key_shares_limit != 0;
+  const uint8_t limit = (key_shares_limit >= 1 && key_shares_limit <= 3) ? key_shares_limit : 2;
+  const bool enable_second_key_share = (limit >= 2);
+  const bool enable_three_key_shares = (limit >= 3);
 
   if (hs->max_version < TLS1_3_VERSION) {
     return true;
@@ -2136,6 +2144,7 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
 
   uint16_t group_id = override_group_id;
   uint16_t second_group_id = 0;
+  uint16_t third_group_id = 0;
   if (override_group_id == 0) {
     // Predict the most preferred group.
     Span<const uint16_t> groups = tls1_get_grouplist(hs);
@@ -2145,13 +2154,14 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
     }
 
     group_id = groups[0];
-
-    // We'll try to include one post-quantum and one classical initial key
-    // share.
-    for (size_t i = 1; i < groups.size() && second_group_id == 0; i++) {
-      if (is_post_quantum_group(group_id) != is_post_quantum_group(groups[i])) {
+    // Include one post-quantum and one classical initial key share.
+    for (size_t i = 1; i < groups.size(); i++) {
+      if (enable_second_key_share && second_group_id == 0 && (is_custom || (is_post_quantum_group(group_id) != is_post_quantum_group(groups[i])))) {
         second_group_id = groups[i];
         assert(second_group_id != group_id);
+      } else if (enable_three_key_shares && third_group_id == 0 && 
+          (is_custom || is_post_quantum_group(group_id) != is_post_quantum_group(groups[i]))) {
+        third_group_id = groups[i];
       }
     }
   }
@@ -2171,6 +2181,16 @@ bool ssl_setup_key_shares(SSL_HANDSHAKE *hs, uint16_t override_group_id) {
         !CBB_add_u16(cbb.get(), second_group_id) ||
         !CBB_add_u16_length_prefixed(cbb.get(), &key_exchange) ||
         !hs->key_shares[1]->Generate(&key_exchange)) {
+      return false;
+    }
+  }
+
+  if (third_group_id != 0) {
+    hs->key_shares[2] = SSLKeyShare::Create(third_group_id);
+    if (!hs->key_shares[2] ||  //
+        !CBB_add_u16(cbb.get(), third_group_id) ||
+        !CBB_add_u16_length_prefixed(cbb.get(), &key_exchange) ||
+        !hs->key_shares[2]->Generate(&key_exchange)) {
       return false;
     }
   }
@@ -2213,13 +2233,21 @@ bool ssl_ext_key_share_parse_serverhello(SSL_HANDSHAKE *hs,
   }
 
   SSLKeyShare *key_share = hs->key_shares[0].get();
+  // group_id is the server chosen group_id, and if key_share[0] is not chosen
   if (key_share->GroupID() != group_id) {
+    // the server also did not choose the second one
     if (!hs->key_shares[1] || hs->key_shares[1]->GroupID() != group_id) {
-      *out_alert = SSL_AD_ILLEGAL_PARAMETER;
-      OPENSSL_PUT_ERROR(SSL, SSL_R_WRONG_CURVE);
-      return false;
+      // the server also did not choose the third one, we are out of options
+      if (!hs->key_shares[2] || hs->key_shares[2]->GroupID() != group_id) {
+        *out_alert = SSL_AD_ILLEGAL_PARAMETER;
+        OPENSSL_PUT_ERROR(SSL, SSL_R_WRONG_CURVE);
+        return false;
+      } else {
+        key_share = hs->key_shares[2].get();
+      }
+    } else {
+      key_share = hs->key_shares[1].get();
     }
-    key_share = hs->key_shares[1].get();
   }
 
   if (!key_share->Decap(out_secret, out_alert, ciphertext)) {
@@ -2227,9 +2255,11 @@ bool ssl_ext_key_share_parse_serverhello(SSL_HANDSHAKE *hs,
     return false;
   }
 
+  // choose the first one
   hs->new_session->group_id = group_id;
   hs->key_shares[0].reset();
   hs->key_shares[1].reset();
+  hs->key_shares[2].reset();
   return true;
 }
 
@@ -2686,6 +2716,27 @@ static bool ext_quic_transport_params_add_serverhello_legacy(SSL_HANDSHAKE *hs,
 static bool ext_delegated_credential_add_clienthello(
     const SSL_HANDSHAKE *hs, CBB *out, CBB *out_compressible,
     ssl_client_hello_type_t type) {
+  // curl-impersonate
+  if (hs->config->delegated_credentials.empty()) {
+    return true;
+  }
+
+  CBB contents, data;
+  const Array<uint16_t>& signature_hash_algorithms = hs->config->delegated_credentials;
+  if (!CBB_add_u16(out, TLSEXT_TYPE_delegated_credential) ||
+    !CBB_add_u16_length_prefixed(out, &contents) ||
+    !CBB_add_u16_length_prefixed(&contents, &data)) {
+    return false;
+  }
+
+  for (const uint16_t alg : signature_hash_algorithms) {
+    if (!CBB_add_u16(&data, alg)) {
+      return false;
+    }
+  }
+  if (!CBB_flush(out)) {
+    return false;
+  }
   return true;
 }
 
@@ -3033,6 +3084,40 @@ bool ssl_negotiate_alps(SSL_HANDSHAKE *hs, uint8_t *out_alert,
   return true;
 }
 
+// curl-impersonate
+static bool record_size_limit_add_clienthello(const SSL_HANDSHAKE* hs, CBB* out,
+                                              CBB* out_compressible,
+                                              ssl_client_hello_type_t type) {
+  if (hs->config->record_size_limit == 0) {
+    return true;
+  }
+
+  CBB data;
+  const uint16_t data_ = hs->config->record_size_limit;
+  if (!CBB_add_u16(out, TLSEXT_TYPE_record_size_limit) ||
+    !CBB_add_u16_length_prefixed(out, &data) || !CBB_add_u16(&data, data_) ||
+    !CBB_flush(out)) {
+    return false;
+  }
+  return true;
+}
+
+static bool record_size_limit_parse_serverhello(SSL_HANDSHAKE* hs,
+                                                uint8_t* out_alert,
+                                                CBS* contents) {
+  return true;
+}
+
+static bool record_size_limit_parse_clienthello(SSL_HANDSHAKE* hs,
+                                                uint8_t* out_alert,
+                                                CBS* contents) {
+  return true;
+}
+
+static bool record_size_limit_add_serverhello(SSL_HANDSHAKE* hs, CBB* out) {
+  return true;
+}
+
 // kExtensions contains all the supported extensions.
 static const struct tls_extension kExtensions[] = {
     {
@@ -3207,6 +3292,13 @@ static const struct tls_extension kExtensions[] = {
         ext_alps_add_serverhello,
     },
     {
+        TLSEXT_TYPE_record_size_limit,
+        record_size_limit_add_clienthello,
+        record_size_limit_parse_serverhello,
+        record_size_limit_parse_clienthello,
+        record_size_limit_add_serverhello,
+    },
+    {
         TLSEXT_TYPE_application_settings_old,
         ext_alps_add_clienthello_old,
         ext_alps_parse_serverhello_old,
@@ -3245,6 +3337,7 @@ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
       !permutation.InitForOverwrite(kNumExtensions)) {
     return false;
   }
+  // By default, nothing is permuted.
   for (size_t i = 0; i < kNumExtensions; i++) {
     permutation[i] = i;
   }
@@ -3267,6 +3360,43 @@ static const struct tls_extension *tls_extension_find(uint32_t *out_index,
   }
 
   return NULL;
+}
+
+// curl-impersonate: set customized extension order
+//
+// Generate the extension_permutation array from a customized extension order string.
+//
+// The customized extension order string is a dash-separated list of extensions.
+//
+bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
+  if (hs->config->extension_order == nullptr) {
+    return true;
+  }
+  // fprintf(stderr, "order %s\n", hs->config->extension_order);
+  Array<uint8_t> order;
+  if (!order.Init(kNumExtensions)) {
+    return false;
+  }
+  // By default, nothing is reordered.
+  for (size_t i = 0; i < kNumExtensions; i++) {
+    order[i] = 255;
+  }
+  // split the order string, and put there order in the table
+  const char *delimiter = "-";
+  char *tmp = strdup(hs->config->extension_order);
+  char *ext = strtok(tmp, delimiter);
+  size_t idx = 0;
+  while (ext != nullptr) {
+    unsigned ext_index = 0;
+    tls_extension_find(&ext_index, atoi(ext));
+    order[idx] = ext_index;
+    ext = strtok(NULL, delimiter);
+    idx++;
+  }
+  free(tmp);
+
+  hs->extension_permutation = std::move(order);
+  return true;
 }
 
 static bool add_padding_extension(CBB *cbb, uint16_t ext, size_t len) {
@@ -3315,6 +3445,7 @@ static bool ssl_add_clienthello_tlsext_inner(SSL_HANDSHAKE *hs, CBB *out,
     size_t i = hs->extension_permutation.empty()
                    ? unpermuted
                    : hs->extension_permutation[unpermuted];
+    if (i == 255) { continue; } // curl-impersonate: skip non-exist extensions
     const size_t len_before = CBB_len(&extensions);
     const size_t len_compressed_before = CBB_len(compressed.get());
     if (!kExtensions[i].add_clienthello(hs, &extensions, compressed.get(),
@@ -3424,6 +3555,7 @@ bool ssl_add_clienthello_tlsext(SSL_HANDSHAKE *hs, CBB *out, CBB *out_encoded,
     size_t i = hs->extension_permutation.empty()
                    ? unpermuted
                    : hs->extension_permutation[unpermuted];
+    if (i == 255) { continue; } // curl-impersonate: skip non-exist extensions
     const size_t len_before = CBB_len(&extensions);
     if (!kExtensions[i].add_clienthello(hs, &extensions, &extensions, type)) {
       OPENSSL_PUT_ERROR(SSL, SSL_R_ERROR_ADDING_EXTENSION);

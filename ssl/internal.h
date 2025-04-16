@@ -690,10 +690,11 @@ BSSL_NAMESPACE_BEGIN
 
 // Bits for |algorithm_mkey| (key exchange algorithm).
 #define SSL_kRSA 0x00000001u
-#define SSL_kECDHE 0x00000002u
+#define SSL_kDHE 0x00000002u
+#define SSL_kECDHE 0x00000004u
 // SSL_kPSK is only set for plain PSK, not ECDHE_PSK.
-#define SSL_kPSK 0x00000004u
-#define SSL_kGENERIC 0x00000008u
+#define SSL_kPSK 0x00000008u
+#define SSL_kGENERIC 0x00000010u
 
 // Bits for |algorithm_auth| (server authentication).
 #define SSL_aRSA_SIGN 0x00000001u
@@ -718,8 +719,9 @@ BSSL_NAMESPACE_BEGIN
 // Bits for |algorithm_mac| (symmetric authentication).
 #define SSL_SHA1 0x00000001u
 #define SSL_SHA256 0x00000002u
+#define SSL_SHA384 0x00000004u
 // SSL_AEAD is set for all AEADs.
-#define SSL_AEAD 0x00000004u
+#define SSL_AEAD 0x00000008u
 
 // Bits for |algorithm_prf| (handshake digest).
 #define SSL_HANDSHAKE_MAC_DEFAULT 0x1
@@ -2131,7 +2133,7 @@ struct SSL_HANDSHAKE {
   // key_shares are the current key exchange instances. The second is only used
   // as a client if we believe that we should offer two key shares in a
   // ClientHello.
-  UniquePtr<SSLKeyShare> key_shares[2];
+  UniquePtr<SSLKeyShare> key_shares[3];
 
   // transcript is the current handshake transcript.
   SSLTranscript transcript;
@@ -2188,6 +2190,9 @@ struct SSL_HANDSHAKE {
   // supports with delegated credentials, or empty if the peer does not support
   // delegated credentials.
   Array<uint16_t> peer_delegated_credential_sigalgs;
+
+  Array<uint8_t> dh_p;
+  Array<uint8_t> dh_g;
 
   // peer_key is the peer's ECDH key for a TLS 1.2 client.
   Array<uint8_t> peer_key;
@@ -2456,6 +2461,12 @@ bssl::UniquePtr<SSL_SESSION> tls13_create_session_with_ticket(SSL *ssl,
 // ssl_setup_extension_permutation computes a ClientHello extension permutation
 // for |hs|, if applicable. It returns true on success and false on error.
 bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs);
+
+// curl-impersonate
+bool ssl_set_extension_order(SSL_HANDSHAKE *hs);
+
+// curl-impersonate
+bool ssl_set_key_usage_check_enabled(SSL_HANDSHAKE *hs);
 
 // ssl_setup_key_shares computes client key shares and saves them in |hs|. It
 // returns true on success and false on failure. If |override_group_id| is zero,
@@ -3520,6 +3531,12 @@ struct SSL_CONFIG {
   // crypto
   UniquePtr<SSLCipherPreferenceList> cipher_list;
 
+  // curl-impersonate
+  char *extension_order = nullptr;
+
+  // curl-impersonate
+  int key_usage_check_enabled = 1;
+
   // This is used to hold the local certificate used (i.e. the server
   // certificate for a server or the client certificate for a client).
   UniquePtr<CERT> cert;
@@ -3577,6 +3594,10 @@ struct SSL_CONFIG {
   // verify_sigalgs, if not empty, is the set of signature algorithms
   // accepted from the peer in decreasing order of preference.
   Array<uint16_t> verify_sigalgs;
+
+  // delegated_credentials, if not empty, is the set of signature algorithms
+  // supported by the client.
+  Array<uint16_t> delegated_credentials;
 
   // srtp_profiles is the list of configured SRTP protection profiles for
   // DTLS-SRTP.
@@ -3642,6 +3663,14 @@ struct SSL_CONFIG {
   // aes_hw_override if set indicates we should override checking for aes
   // hardware support, and use the value in aes_hw_override_value instead.
   bool aes_hw_override : 1;
+
+  // curl-impersonate: record_size_limit is whether to send record size limit
+  // extension.
+  uint16_t record_size_limit = 0;
+
+  // curl-impersonate: key_shares_limit is the maximum number of key shares to
+  // send.
+  uint8_t key_shares_limit = 0;
 
   // aes_hw_override_value is used for testing to indicate the support or lack
   // of support for AES hw. The value is only considered if |aes_hw_override| is
@@ -4024,6 +4053,12 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
 
   bssl::UniquePtr<bssl::SSLCipherPreferenceList> cipher_list;
 
+  // curl-impersonate
+  char *extension_order = nullptr;
+
+  // curl-impersonate
+  int key_usage_check_enabled = 1;
+
   X509_STORE *cert_store = nullptr;
   LHASH_OF(SSL_SESSION) *sessions = nullptr;
   // Most session-ids that will be cached, default is
@@ -4248,6 +4283,10 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
   // accepted from the peer in decreasing order of preference.
   bssl::Array<uint16_t> verify_sigalgs;
 
+  // delegated_credentials, if not empty, is the set of signature algorithms
+  // supported by the client.
+  bssl::Array<uint16_t> delegated_credentials;
+
   // retain_only_sha256_of_client_certs is true if we should compute the SHA256
   // hash of the peer's certificate and then discard it to save memory and
   // session space. Only effective on the server side.
@@ -4299,6 +4338,14 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
   // of support for AES hardware. The value is only considered if
   // |aes_hw_override| is true.
   bool aes_hw_override_value : 1;
+
+  // curl-impersonate: record_size_limit is whether to send record size limit
+  // extension.
+  uint16_t record_size_limit = 0;
+
+  // curl-impersonate: key_shares limit is the maximum number of key shares to
+  // send.
+  uint8_t key_shares_limit = 0;
 
  private:
   friend RefCounted;
