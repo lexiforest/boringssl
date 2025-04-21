@@ -2526,6 +2526,9 @@ bool ssl_set_extension_order(SSL_HANDSHAKE *hs);
 // curl-impersonate
 bool ssl_set_key_usage_check_enabled(SSL_HANDSHAKE *hs);
 
+// curl-impersonate
+bool ssl_set_use_firefox_tls13_ciphers(SSL_HANDSHAKE *hs);
+
 // ssl_setup_key_shares computes client key shares and saves them in |hs|. It
 // returns true on success and false on failure. If |override_group_id| is zero,
 // it offers the default groups, including GREASE. If it is non-zero, it offers
@@ -3598,6 +3601,9 @@ struct SSL_CONFIG {
   // curl-impersonate
   int key_usage_check_enabled = 1;
 
+  // curl-impersonate
+  int use_firefox_tls13_ciphers = 0;
+
   // This is used to hold the local certificate used (i.e. the server
   // certificate for a server or the client certificate for a client).
   UniquePtr<CERT> cert;
@@ -4110,6 +4116,9 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
 
   // curl-impersonate
   int key_usage_check_enabled = 1;
+
+  // curl-impersonate
+  int use_firefox_tls13_ciphers = 0;
 
   X509_STORE *cert_store = nullptr;
   LHASH_OF(SSL_SESSION) *sessions = nullptr;

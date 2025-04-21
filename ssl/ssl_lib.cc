@@ -523,6 +523,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->permute_extensions = ctx->permute_extensions;
   ssl->config->extension_order = ctx->extension_order;  // curl-impersonate
   ssl->config->key_usage_check_enabled = ctx->key_usage_check_enabled;  // curl-impersonate
+  ssl->config->use_firefox_tls13_ciphers = ctx->use_firefox_tls13_ciphers;  // curl-impersonate
   ssl->config->aes_hw_override = ctx->aes_hw_override;
   ssl->config->aes_hw_override_value = ctx->aes_hw_override_value;
   ssl->config->compliance_policy = ctx->compliance_policy;
@@ -2926,6 +2927,11 @@ int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order) {
 
 int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled) {
   ctx->key_usage_check_enabled = enabled;
+  return 0;
+}
+
+int SSL_CTX_set_use_firefox_tls13_ciphers(SSL_CTX *ctx, int enabled) {
+  ctx->use_firefox_tls13_ciphers = enabled;
   return 0;
 }
 
