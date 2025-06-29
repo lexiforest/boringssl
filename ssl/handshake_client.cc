@@ -84,14 +84,6 @@ static void ssl_get_client_disabled(const SSL_HANDSHAKE *hs,
   }
 }
 
-static bool ssl_add_tls13_cipher(CBB *cbb, uint16_t cipher_id,
-                                 ssl_compliance_policy_t policy) {
-  if (ssl_tls13_cipher_meets_policy(cipher_id, policy)) {
-    return CBB_add_u16(cbb, cipher_id);
-  }
-  return true;
-}
-
 static bool ssl_write_client_cipher_list(const SSL_HANDSHAKE *hs, CBB *out,
                                          ssl_client_hello_type_t type) {
   const SSL *const ssl = hs->ssl;
@@ -109,49 +101,9 @@ static bool ssl_write_client_cipher_list(const SSL_HANDSHAKE *hs, CBB *out,
     return false;
   }
 
-  // Add TLS 1.3 ciphers. Order ChaCha20-Poly1305 relative to AES-GCM based on
-  // hardware support.
-  if (hs->max_version >= TLS1_3_VERSION) {
-    static const uint16_t kCiphersNoAESHardware[] = {
-        TLS1_3_CK_CHACHA20_POLY1305_SHA256 & 0xffff,
-        TLS1_3_CK_AES_128_GCM_SHA256 & 0xffff,
-        TLS1_3_CK_AES_256_GCM_SHA384 & 0xffff,
-    };
-    static const uint16_t kCiphersAESHardware[] = {
-        TLS1_3_CK_AES_128_GCM_SHA256 & 0xffff,
-        TLS1_3_CK_AES_256_GCM_SHA384 & 0xffff,
-        TLS1_3_CK_CHACHA20_POLY1305_SHA256 & 0xffff,
-    };
-    static const uint16_t kCiphersCNSA[] = {
-        TLS1_3_CK_AES_256_GCM_SHA384 & 0xffff,
-        TLS1_3_CK_AES_128_GCM_SHA256 & 0xffff,
-        TLS1_3_CK_CHACHA20_POLY1305_SHA256 & 0xffff,
-    };
-    // curl-impersonate: Firefox uses a different order
-    static const uint16_t kCiphersFirefox[] = {
-        TLS1_3_CK_AES_128_GCM_SHA256 & 0xffff,
-        TLS1_3_CK_CHACHA20_POLY1305_SHA256 & 0xffff,
-        TLS1_3_CK_AES_256_GCM_SHA384 & 0xffff,
-    };
 
-    const bool has_aes_hw = ssl->config->aes_hw_override
-                                ? ssl->config->aes_hw_override_value
-                                : EVP_has_aes_hardware();
-
-    const bssl::Span<const uint16_t> ciphers =
-        ssl->config->use_firefox_tls13_ciphers ? kCiphersFirefox :
-        ssl->config->compliance_policy == ssl_compliance_policy_cnsa_202407
-            ? bssl::Span<const uint16_t>(kCiphersCNSA)
-            : (has_aes_hw ? bssl::Span<const uint16_t>(kCiphersAESHardware)
-                          : bssl::Span<const uint16_t>(kCiphersNoAESHardware));
-
-    for (auto cipher : ciphers) {
-      if (!ssl_add_tls13_cipher(&child, cipher,
-                                ssl->config->compliance_policy)) {
-        return false;
-      }
-    }
-  }
+  // curl-impersonate: TLS 1.3 suites are added uniformly with other suites.
+  // Notably, Firefox and Safari does not honor the rules defined in boringssl.
 
   if (hs->min_version < TLS1_3_VERSION && type != ssl_client_hello_inner) {
     bool any_enabled = false;

@@ -4912,9 +4912,6 @@ OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
 // curl-impersonate
 OPENSSL_EXPORT int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled);
 
-// curl-impersonate
-OPENSSL_EXPORT int SSL_CTX_set_use_firefox_tls13_ciphers(SSL_CTX *ctx, int enabled);
-
 // SSL_max_seal_overhead returns the maximum overhead, in bytes, of sealing a
 // record with |ssl|.
 OPENSSL_EXPORT size_t SSL_max_seal_overhead(const SSL *ssl);
