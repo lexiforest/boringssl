@@ -521,47 +521,10 @@ int SSL_is_signature_algorithm_rsa_pss(uint16_t sigalg) {
 
 // curl-impersonate: Remove the uniqueness check. Older Safari versions (15)
 // send out duplicated algorithm prefs.
-// static int compare_uint16_t(const void *p1, const void *p2) {
-//  uint16_t u1 = *((const uint16_t *)p1);
-//   uint16_t u2 = *((const uint16_t *)p2);
-//   if (u1 < u2) {
-//     return -1;
-//   } else if (u1 > u2) {
-//     return 1;
-//   } else {
-//     return 0;
-//   }
-// }
-
-// static bool sigalgs_unique(Span<const uint16_t> in_sigalgs) {
-//   if (in_sigalgs.size() < 2) {
-//     return true;
-//   }
-// 
-//   Array<uint16_t> sigalgs;
-//   if (!sigalgs.CopyFrom(in_sigalgs)) {
-//     return false;
-//   }
-// 
-//   qsort(sigalgs.data(), sigalgs.size(), sizeof(uint16_t), compare_uint16_t);
-// 
-//   for (size_t i = 1; i < sigalgs.size(); i++) {
-//     if (sigalgs[i - 1] == sigalgs[i]) {
-//       OPENSSL_PUT_ERROR(SSL, SSL_R_DUPLICATE_SIGNATURE_ALGORITHM);
-//       return false;
-//     }
-//   }
-// 
-//   return true;
-// }
 
 static bool set_sigalg_prefs(Array<uint16_t> *out, Span<const uint16_t> prefs) {
   // curl-impersonate: Remove the uniqueness check. Older Safari versions (15)
   // send out duplicated algorithm prefs.
-
-  // if (!sigalgs_unique(prefs)) {
-  //   return false;
-  // }
 
   // Check for invalid algorithms, and filter out |SSL_SIGN_RSA_PKCS1_MD5_SHA1|.
   Array<uint16_t> filtered;

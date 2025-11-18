@@ -522,6 +522,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
       ctx->retain_only_sha256_of_client_certs;
   ssl->config->permute_extensions = ctx->permute_extensions;
   ssl->config->extension_order = ctx->extension_order;  // curl-impersonate
+  ssl->config->cipher_order = ctx->cipher_order;  // curl-impersonate
   ssl->config->key_usage_check_enabled = ctx->key_usage_check_enabled;  // curl-impersonate
   ssl->config->aes_hw_override = ctx->aes_hw_override;
   ssl->config->aes_hw_override_value = ctx->aes_hw_override_value;
@@ -1982,6 +1983,7 @@ const char *SSL_get_cipher_list(const SSL *ssl, int n) {
 int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str) {
   const bool has_aes_hw = ctx->aes_hw_override ? ctx->aes_hw_override_value
                                                : EVP_has_aes_hardware();
+  ctx->cipher_order = str;
   return ssl_create_cipher_list(&ctx->cipher_list, has_aes_hw, str,
                                 false /* not strict */);
 }

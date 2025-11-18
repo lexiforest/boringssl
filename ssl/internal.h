@@ -3596,6 +3596,9 @@ struct SSL_CONFIG {
   char *extension_order = nullptr;
 
   // curl-impersonate
+  const char *cipher_order = nullptr;
+
+  // curl-impersonate
   int key_usage_check_enabled = 1;
 
   // This is used to hold the local certificate used (i.e. the server
@@ -4107,6 +4110,9 @@ struct ssl_ctx_st : public bssl::RefCounted<ssl_ctx_st> {
 
   // curl-impersonate
   char *extension_order = nullptr;
+
+  // curl-impersonate
+  const char *cipher_order = nullptr;
 
   // curl-impersonate
   int key_usage_check_enabled = 1;
