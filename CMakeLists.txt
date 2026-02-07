@@ -706,8 +706,6 @@ set_target_properties(
   PROPERTIES
   COMPILE_FLAGS "${PKI_CXX_FLAGS}")
 
-add_executable(bssl ${BSSL_SOURCES})
-target_link_libraries(bssl ssl crypto)
 
 # Historically, targets were built in subdirectories. For compatibility with
 # existing tools, we, for now, copy the targets into the subdirectories. This
@@ -774,7 +772,6 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 
 if(INSTALL_ENABLED)
   install(TARGETS crypto ssl EXPORT OpenSSLTargets)
-  install(TARGETS bssl)
   install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
   install(EXPORT OpenSSLTargets
           FILE OpenSSLTargets.cmake
