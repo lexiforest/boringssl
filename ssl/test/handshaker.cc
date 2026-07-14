@@ -66,8 +66,8 @@ bool Handshaker(const TestConfig *config, int rfd, int wfd,
     return false;
   }
 
-  // Set |O_NONBLOCK| in order to break out of the loop when we hit
-  // |SSL_ERROR_WANT_READ|, so that we can send |kControlMsgWantRead| to the
+  // Set `O_NONBLOCK` in order to break out of the loop when we hit
+  // `SSL_ERROR_WANT_READ`, so that we can send `kControlMsgWantRead` to the
   // proxy.
   if (fcntl(rfd, F_SETFL, O_NONBLOCK) != 0) {
     perror("fcntl");
@@ -161,7 +161,7 @@ bool GenerateHandshakeHint(const TestConfig *config,
     return false;
   }
 
-  // TODO(davidben): When split handshakes is replaced, move this into |NewSSL|.
+  // TODO(davidben): When split handshakes is replaced, move this into `NewSSL`.
   assert(config->is_server);
   SSL_set_accept_state(ssl.get());
 
@@ -215,6 +215,14 @@ bool GenerateHandshakeHint(const TestConfig *config,
   return true;
 }
 
+int SignalUnimplemented() {
+  const char msg = kControlMsgUnimplemented;
+  if (write_eintr(kFdControl, &msg, 1) != 1) {
+    return 2;
+  }
+  return 1;
+}
+
 int SignalError() {
   const char msg = kControlMsgError;
   if (write_eintr(kFdControl, &msg, 1) != 1) {
@@ -226,26 +234,9 @@ int SignalError() {
 }  // namespace
 
 int main(int argc, char **argv) {
-  TestConfig initial_config, resume_config, retry_config;
-  if (!ParseConfig(argc - 1, argv + 1, /*is_shim=*/false, &initial_config,
-                   &resume_config, &retry_config)) {
-    return SignalError();
-  }
-  const TestConfig *config =
-      initial_config.handshaker_resume ? &resume_config : &initial_config;
-#if defined(BORINGSSL_UNSAFE_DETERMINISTIC_MODE)
-  if (initial_config.handshaker_resume) {
-    // If the PRNG returns exactly the same values when trying to resume then a
-    // "random" session ID will happen to exactly match the session ID
-    // "randomly" generated on the initial connection. The client will thus
-    // incorrectly believe that the server is resuming.
-    uint8_t byte;
-    RAND_bytes(&byte, 1);
-  }
-#endif  // BORINGSSL_UNSAFE_DETERMINISTIC_MODE
-
-  // read() will return the entire message in one go, because it's a datagram
-  // socket.
+  // Read the request before parsing the configuration. This ensures that
+  // flag-parsing errors are signaled at a reliable point in time. read() will
+  // return the entire message in one go, because it's a datagram socket.
   constexpr size_t kBufSize = 1024 * 1024;
   std::vector<uint8_t> request(kBufSize);
   ssize_t len = read_eintr(kFdControl, request.data(), request.size());
@@ -254,6 +245,27 @@ int main(int argc, char **argv) {
     return 2;
   }
   request.resize(static_cast<size_t>(len));
+
+  TestConfig initial_config, resume_config, retry_config;
+  if (!ParseConfig(argc - 1, argv + 1, /*is_shim=*/false, &initial_config,
+                   &resume_config, &retry_config)) {
+    return SignalUnimplemented();
+  }
+  const TestConfig *config =
+      initial_config.handshaker_resume ? &resume_config : &initial_config;
+#if defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
+  if (initial_config.fuzzer_mode) {
+    CRYPTO_set_fuzzer_mode(1);
+  }
+  if (initial_config.handshaker_resume) {
+    // If the PRNG returns exactly the same values when trying to resume then a
+    // "random" session ID will happen to exactly match the session ID
+    // "randomly" generated on the initial connection. The client will thus
+    // incorrectly believe that the server is resuming.
+    uint8_t byte;
+    RAND_bytes(&byte, 1);
+  }
+#endif  // FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
 
   if (config->handshake_hints) {
     if (!GenerateHandshakeHint(config, request, kFdControl)) {

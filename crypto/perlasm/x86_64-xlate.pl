@@ -93,6 +93,7 @@ my $PTR=" PTR";
 
 my $nasmref=2.03;
 my $nasm=0;
+my %segment_had_labels;
 
 if    ($flavour eq "mingw64")	{ $gas=1; $elf=0; $win64=1;
 				  # TODO(davidben): Before supporting the
@@ -127,7 +128,7 @@ my %globals;
 	    if ($self->{op} =~ /^(movz)x?([bw]).*/) {	# movz is pain...
 		$self->{op} = $1;
 		$self->{sz} = $2;
-	    } elsif ($self->{op} =~ /call|jmp/) {
+	    } elsif ($self->{op} =~ /call|jmp|^rdrand$/) {
 		$self->{sz} = "";
 	    } elsif ($self->{op} =~ /^p/ && $' !~ /^(ush|op|insrw)/) { # SSEn
 		$self->{sz} = "";
@@ -1319,198 +1320,6 @@ ____
     }
 }
 
-# Upon initial x86_64 introduction SSE>2 extensions were not introduced
-# yet. In order not to be bothered by tracing exact assembler versions,
-# but at the same time to provide a bare security minimum of AES-NI, we
-# hard-code some instructions. Extensions past AES-NI on the other hand
-# are traced by examining assembler version in individual perlasm
-# modules...
-
-my %regrm = (	"%eax"=>0, "%ecx"=>1, "%edx"=>2, "%ebx"=>3,
-		"%esp"=>4, "%ebp"=>5, "%esi"=>6, "%edi"=>7	);
-
-sub rex {
- my $opcode=shift;
- my ($dst,$src,$rex)=@_;
-
-   $rex|=0x04 if($dst>=8);
-   $rex|=0x01 if($src>=8);
-   push @$opcode,($rex|0x40) if ($rex);
-}
-
-my $movq = sub {	# elderly gas can't handle inter-register movq
-  my $arg = shift;
-  my @opcode=(0x66);
-    if ($arg =~ /%xmm([0-9]+),\s*%r(\w+)/) {
-	my ($src,$dst)=($1,$2);
-	if ($dst !~ /[0-9]+/)	{ $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,$src,$dst,0x8);
-	push @opcode,0x0f,0x7e;
-	push @opcode,0xc0|(($src&7)<<3)|($dst&7);	# ModR/M
-	@opcode;
-    } elsif ($arg =~ /%r(\w+),\s*%xmm([0-9]+)/) {
-	my ($src,$dst)=($2,$1);
-	if ($dst !~ /[0-9]+/)	{ $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,$src,$dst,0x8);
-	push @opcode,0x0f,0x6e;
-	push @opcode,0xc0|(($src&7)<<3)|($dst&7);	# ModR/M
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pextrd = sub {
-    if (shift =~ /\$([0-9]+),\s*%xmm([0-9]+),\s*(%\w+)/) {
-      my @opcode=(0x66);
-	my $imm=$1;
-	my $src=$2;
-	my $dst=$3;
-	if ($dst =~ /%r([0-9]+)d/)	{ $dst = $1; }
-	elsif ($dst =~ /%e/)		{ $dst = $regrm{$dst}; }
-	rex(\@opcode,$src,$dst);
-	push @opcode,0x0f,0x3a,0x16;
-	push @opcode,0xc0|(($src&7)<<3)|($dst&7);	# ModR/M
-	push @opcode,$imm;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pinsrd = sub {
-    if (shift =~ /\$([0-9]+),\s*(%\w+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	my $imm=$1;
-	my $src=$2;
-	my $dst=$3;
-	if ($src =~ /%r([0-9]+)/)	{ $src = $1; }
-	elsif ($src =~ /%e/)		{ $src = $regrm{$src}; }
-	rex(\@opcode,$dst,$src);
-	push @opcode,0x0f,0x3a,0x22;
-	push @opcode,0xc0|(($dst&7)<<3)|($src&7);	# ModR/M
-	push @opcode,$imm;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pshufb = sub {
-    if (shift =~ /%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	rex(\@opcode,$2,$1);
-	push @opcode,0x0f,0x38,0x00;
-	push @opcode,0xc0|($1&7)|(($2&7)<<3);		# ModR/M
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $palignr = sub {
-    if (shift =~ /\$([0-9]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	rex(\@opcode,$3,$2);
-	push @opcode,0x0f,0x3a,0x0f;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	push @opcode,$1;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $pclmulqdq = sub {
-    if (shift =~ /\$([x0-9a-f]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x66);
-	rex(\@opcode,$3,$2);
-	push @opcode,0x0f,0x3a,0x44;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	my $c=$1;
-	push @opcode,$c=~/^0/?oct($c):$c;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $rdrand = sub {
-    if (shift =~ /%[er](\w+)/) {
-      my @opcode=();
-      my $dst=$1;
-	if ($dst !~ /[0-9]+/) { $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,0,$dst,8);
-	push @opcode,0x0f,0xc7,0xf0|($dst&7);
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $rdseed = sub {
-    if (shift =~ /%[er](\w+)/) {
-      my @opcode=();
-      my $dst=$1;
-	if ($dst !~ /[0-9]+/) { $dst = $regrm{"%e$dst"}; }
-	rex(\@opcode,0,$dst,8);
-	push @opcode,0x0f,0xc7,0xf8|($dst&7);
-	@opcode;
-    } else {
-	();
-    }
-};
-
-# Not all AVX-capable assemblers recognize AMD XOP extension. Since we
-# are using only two instructions hand-code them in order to be excused
-# from chasing assembler versions...
-
-sub rxb {
- my $opcode=shift;
- my ($dst,$src1,$src2,$rxb)=@_;
-
-   $rxb|=0x7<<5;
-   $rxb&=~(0x04<<5) if($dst>=8);
-   $rxb&=~(0x01<<5) if($src1>=8);
-   $rxb&=~(0x02<<5) if($src2>=8);
-   push @$opcode,$rxb;
-}
-
-my $vprotd = sub {
-    if (shift =~ /\$([x0-9a-f]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x8f);
-	rxb(\@opcode,$3,$2,-1,0x08);
-	push @opcode,0x78,0xc2;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	my $c=$1;
-	push @opcode,$c=~/^0/?oct($c):$c;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-my $vprotq = sub {
-    if (shift =~ /\$([x0-9a-f]+),\s*%xmm([0-9]+),\s*%xmm([0-9]+)/) {
-      my @opcode=(0x8f);
-	rxb(\@opcode,$3,$2,-1,0x08);
-	push @opcode,0x78,0xc3;
-	push @opcode,0xc0|($2&7)|(($3&7)<<3);		# ModR/M
-	my $c=$1;
-	push @opcode,$c=~/^0/?oct($c):$c;
-	@opcode;
-    } else {
-	();
-    }
-};
-
-# Intel Control-flow Enforcement Technology extension. All functions and
-# indirect branch targets will have to start with this instruction...
-
-my $endbranch = sub {
-    (0xf3,0x0f,0x1e,0xfa);
-};
-
 ########################################################################
 
 {
@@ -1534,7 +1343,7 @@ default	rel
 \%define _CET_ENDBR
 
 \%ifdef BORINGSSL_PREFIX
-\%include "boringssl_prefix_symbols_nasm.inc"
+\%include "boringssl_prefix_symbols_internal_x86_64_win_asm.inc"
 \%endif
 ___
 } elsif ($masm) {
@@ -1583,7 +1392,32 @@ sub process_line {
     $line =~ s|^\s+||;		# ... and skip white spaces in beginning
     $line =~ s|\s+$||;		# ... and at the end
 
-    if (my $label=label->re(\$line))	{ print $label->out(); }
+    if (my $label=label->re(\$line)) {
+	if ($gas) {
+	    my $name = ($globals{$label->{value}} or $label->{value});
+	    if ($name =~ /^\Q$decor\E/) {
+		if (!$segment_had_labels{$current_segment}) {
+		    # With `.subsections_via_symbols`, an asm-local label
+		    # cannot be the first label of a section.
+		    die "Section $current_segment starts with an asm-local .Label - please add at least a file-local label at the start";
+		}
+	    } else {
+		if ($segment_had_labels{$current_segment}++ && $flavour eq "macosx") {
+		    # The macOS linker may split object files at symbol
+		    # definitions to eliminate dead code. It however is unable
+		    # to track jumps across these bounds, and also, for some
+		    # data objects it may cause layout to change. Marking every
+		    # symbol an alternate entry point is safe and should turn
+		    # the optimization into a NOP for these assembly files and
+		    # may add necessary relocations. It however is invalid to
+		    # mark the _first_ symbol of a section so, as it always is
+		    # considered an entry point.
+		    printf ".alt_entry %s\n", $name;
+		}
+	    }
+	}
+	print $label->out();
+    }
 
     if (my $directive=directive->re(\$line)) {
 	printf "%s",$directive->out();

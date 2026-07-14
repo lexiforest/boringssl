@@ -19,10 +19,12 @@
 #include "internal.h"
 
 
-// least significant word
-#define BN_lsw(n) (((n)->width == 0) ? (BN_ULONG) 0 : (n)->d[0])
+using namespace bssl;
 
-int bn_jacobi(const BIGNUM *a, const BIGNUM *b, BN_CTX *ctx) {
+// least significant word
+#define BN_lsw(n) (((n)->width == 0) ? (BN_ULONG)0 : (n)->d[0])
+
+int bssl::bn_jacobi(const BIGNUM *a, const BIGNUM *b, BN_CTX *ctx) {
   // In 'tab', only odd-indexed entries are relevant:
   // For any odd BIGNUM n,
   //     tab[BN_lsw(n) & 7]
@@ -42,32 +44,29 @@ int bn_jacobi(const BIGNUM *a, const BIGNUM *b, BN_CTX *ctx) {
     return -2;
   }
 
-  int ret = -2;
-  BN_CTX_start(ctx);
+  BN_CTXScope scope(ctx);
   BIGNUM *A = BN_CTX_get(ctx);
   BIGNUM *B = BN_CTX_get(ctx);
-  if (B == NULL) {
-    goto end;
+  if (B == nullptr) {
+    return -2;
   }
 
   if (!BN_copy(A, a) ||
       !BN_copy(B, b)) {
-    goto end;
+    return -2;
   }
 
   // Adapted from logic to compute the Kronecker symbol, originally implemented
   // according to Henri Cohen, "A Course in Computational Algebraic Number
   // Theory" (algorithm 1.4.10).
 
-  ret = 1;
-
+  int ret = 1;
   while (1) {
     // Cohen's step 3:
 
     // B is positive and odd
     if (BN_is_zero(A)) {
-      ret = BN_is_one(B) ? ret : 0;
-      goto end;
+      return BN_is_one(B) ? ret : 0;
     }
 
     // now A is non-zero
@@ -76,8 +75,7 @@ int bn_jacobi(const BIGNUM *a, const BIGNUM *b, BN_CTX *ctx) {
       i++;
     }
     if (!BN_rshift(A, A, i)) {
-      ret = -2;
-      goto end;
+      return -2;
     }
     if (i & 1) {
       // i is odd
@@ -93,16 +91,11 @@ int bn_jacobi(const BIGNUM *a, const BIGNUM *b, BN_CTX *ctx) {
 
     // (A, B) := (B mod |A|, |A|)
     if (!BN_nnmod(B, B, A, ctx)) {
-      ret = -2;
-      goto end;
+      return -2;
     }
     BIGNUM *tmp = A;
     A = B;
     B = tmp;
     tmp->neg = 0;
   }
-
-end:
-  BN_CTX_end(ctx);
-  return ret;
 }

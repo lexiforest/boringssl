@@ -25,12 +25,6 @@
 #include "internal.h"
 
 
-#if defined(BORINGSSL_UNSAFE_FUZZER_MODE)
-#define FUZZER_MODE true
-#else
-#define FUZZER_MODE false
-#endif
-
 BSSL_NAMESPACE_BEGIN
 
 SSLAEADContext::SSLAEADContext(const SSL_CIPHER *cipher_arg)
@@ -99,8 +93,8 @@ UniquePtr<SSLAEADContext> SSLAEADContext::Create(
       aead_ctx->ad_is_header_ = true;
     }
   } else {
-    // This is a CBC cipher suite that implements the |EVP_AEAD| interface. The
-    // |EVP_AEAD| takes the MAC key, encryption key, and fixed IV concatenated
+    // This is a CBC cipher suite that implements the `EVP_AEAD` interface. The
+    // `EVP_AEAD` takes the MAC key, encryption key, and fixed IV concatenated
     // as its input key.
     assert(protocol_version < TLS1_3_VERSION);
     BSSL_CHECK(mac_key.size() + enc_key.size() + fixed_iv.size() <=
@@ -112,7 +106,7 @@ UniquePtr<SSLAEADContext> SSLAEADContext::Create(
     enc_key =
         Span(merged_key, enc_key.size() + mac_key.size() + fixed_iv.size());
 
-    // The |EVP_AEAD|'s per-encryption nonce, if any, is actually the CBC IV. It
+    // The `EVP_AEAD`'s per-encryption nonce, if any, is actually the CBC IV. It
     // must be generated randomly and prepended to the record.
     aead_ctx->variable_nonce_included_in_record_ = true;
     aead_ctx->random_variable_nonce_ = true;
@@ -134,7 +128,7 @@ UniquePtr<SSLAEADContext> SSLAEADContext::CreatePlaceholderForQUIC(
 }
 
 size_t SSLAEADContext::ExplicitNonceLen() const {
-  if (!FUZZER_MODE && variable_nonce_included_in_record_) {
+  if (!CRYPTO_fuzzer_mode_enabled() && variable_nonce_included_in_record_) {
     return variable_nonce_len_;
   }
   return 0;
@@ -142,7 +136,7 @@ size_t SSLAEADContext::ExplicitNonceLen() const {
 
 bool SSLAEADContext::SuffixLen(size_t *out_suffix_len, const size_t in_len,
                                const size_t extra_in_len) const {
-  if (is_null_cipher() || FUZZER_MODE) {
+  if (is_null_cipher() || CRYPTO_fuzzer_mode_enabled()) {
     *out_suffix_len = extra_in_len;
     return true;
   }
@@ -168,7 +162,7 @@ bool SSLAEADContext::CiphertextLen(size_t *out_len, const size_t in_len,
 
 size_t SSLAEADContext::MaxOverhead() const {
   return ExplicitNonceLen() +
-         (is_null_cipher() || FUZZER_MODE
+         (is_null_cipher() || CRYPTO_fuzzer_mode_enabled()
               ? 0
               : EVP_AEAD_max_overhead(EVP_AEAD_CTX_aead(ctx_.get())));
 }
@@ -179,10 +173,10 @@ size_t SSLAEADContext::MaxSealInputLen(size_t max_out) const {
     return 0;
   }
   max_out -= explicit_nonce_len;
-  if (is_null_cipher() || FUZZER_MODE) {
+  if (is_null_cipher() || CRYPTO_fuzzer_mode_enabled()) {
     return max_out;
   }
-  // TODO(crbug.com/42290602): This should be part of |EVP_AEAD_CTX|.
+  // TODO(crbug.com/42290602): This should be part of `EVP_AEAD_CTX`.
   size_t overhead = EVP_AEAD_max_overhead(EVP_AEAD_CTX_aead(ctx_.get()));
   if (SSL_CIPHER_is_block_cipher(cipher())) {
     size_t block_size;
@@ -232,7 +226,7 @@ Span<const uint8_t> SSLAEADContext::GetAdditionalData(
 bool SSLAEADContext::Open(Span<uint8_t> *out, uint8_t type,
                           uint16_t record_version, uint64_t seqnum,
                           Span<const uint8_t> header, Span<uint8_t> in) {
-  if (is_null_cipher() || FUZZER_MODE) {
+  if (is_null_cipher() || CRYPTO_fuzzer_mode_enabled()) {
     // Handle the initial NULL cipher.
     *out = in;
     return true;
@@ -321,7 +315,7 @@ bool SSLAEADContext::SealScatter(uint8_t *out_prefix, uint8_t *out,
     return false;
   }
 
-  if (is_null_cipher() || FUZZER_MODE) {
+  if (is_null_cipher() || CRYPTO_fuzzer_mode_enabled()) {
     // Handle the initial NULL cipher.
     OPENSSL_memmove(out, in, in_len);
     OPENSSL_memmove(out_suffix, extra_in, extra_in_len);
@@ -407,7 +401,7 @@ bool SSLAEADContext::Seal(uint8_t *out, size_t *out_len, size_t max_out_len,
   }
 
   if (!SealScatter(out, out + prefix_len, out + prefix_len + in_len, type,
-                   record_version, seqnum, header, in, in_len, 0, 0)) {
+                   record_version, seqnum, header, in, in_len, nullptr, 0)) {
     return false;
   }
   *out_len = prefix_len + in_len + suffix_len;

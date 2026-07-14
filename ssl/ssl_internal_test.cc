@@ -17,350 +17,13 @@
 #include <openssl/aead.h>
 #include <openssl/ssl.h>
 
+#include "../crypto/test/test_util.h"
 #include "internal.h"
 
 
 #if !defined(BORINGSSL_SHARED_LIBRARY)
 BSSL_NAMESPACE_BEGIN
 namespace {
-
-TEST(ArrayTest, InitValueConstructs) {
-  Array<uint8_t> array;
-  ASSERT_TRUE(array.Init(10));
-  EXPECT_EQ(array.size(), 10u);
-  for (size_t i = 0; i < 10u; i++) {
-    EXPECT_EQ(0u, array[i]);
-  }
-}
-
-TEST(ArrayDeathTest, BoundsChecks) {
-  Array<int> array;
-  const int v[] = {1, 2, 3, 4};
-  ASSERT_TRUE(array.CopyFrom(v));
-  EXPECT_DEATH_IF_SUPPORTED(array[4], "");
-}
-
-TEST(VectorTest, Resize) {
-  Vector<size_t> vec;
-  ASSERT_TRUE(vec.empty());
-  EXPECT_EQ(vec.size(), 0u);
-
-  ASSERT_TRUE(vec.Push(42));
-  ASSERT_TRUE(!vec.empty());
-  EXPECT_EQ(vec.size(), 1u);
-
-  // Force a resize operation to occur
-  for (size_t i = 0; i < 16; i++) {
-    ASSERT_TRUE(vec.Push(i + 1));
-  }
-
-  EXPECT_EQ(vec.size(), 17u);
-
-  // Verify that expected values are still contained in vec
-  for (size_t i = 0; i < vec.size(); i++) {
-    EXPECT_EQ(vec[i], i == 0 ? 42 : i);
-  }
-
-  // Clearing the vector should give an empty one.
-  vec.clear();
-  ASSERT_TRUE(vec.empty());
-  EXPECT_EQ(vec.size(), 0u);
-
-  ASSERT_TRUE(vec.Push(42));
-  ASSERT_TRUE(!vec.empty());
-  EXPECT_EQ(vec.size(), 1u);
-  EXPECT_EQ(vec[0], 42u);
-}
-
-TEST(VectorTest, MoveConstructor) {
-  Vector<size_t> vec;
-  for (size_t i = 0; i < 100; i++) {
-    ASSERT_TRUE(vec.Push(i));
-  }
-
-  Vector<size_t> vec_moved(std::move(vec));
-  for (size_t i = 0; i < 100; i++) {
-    EXPECT_EQ(vec_moved[i], i);
-  }
-}
-
-TEST(VectorTest, VectorContainingVectors) {
-  // Representative example of a struct that contains a Vector.
-  struct TagAndArray {
-    size_t tag;
-    Vector<size_t> vec;
-  };
-
-  Vector<TagAndArray> vec;
-  for (size_t i = 0; i < 100; i++) {
-    TagAndArray elem;
-    elem.tag = i;
-    for (size_t j = 0; j < i; j++) {
-      ASSERT_TRUE(elem.vec.Push(j));
-    }
-    ASSERT_TRUE(vec.Push(std::move(elem)));
-  }
-  EXPECT_EQ(vec.size(), static_cast<size_t>(100));
-
-  Vector<TagAndArray> vec_moved(std::move(vec));
-  EXPECT_EQ(vec_moved.size(), static_cast<size_t>(100));
-  size_t count = 0;
-  for (const TagAndArray &elem : vec_moved) {
-    // Test the square bracket operator returns the same value as iteration.
-    EXPECT_EQ(&elem, &vec_moved[count]);
-
-    EXPECT_EQ(elem.tag, count);
-    EXPECT_EQ(elem.vec.size(), count);
-    for (size_t j = 0; j < count; j++) {
-      EXPECT_EQ(elem.vec[j], j);
-    }
-    count++;
-  }
-}
-
-TEST(VectorTest, NotDefaultConstructible) {
-  struct NotDefaultConstructible {
-    explicit NotDefaultConstructible(size_t n) { BSSL_CHECK(array.Init(n)); }
-    Array<int> array;
-  };
-
-  Vector<NotDefaultConstructible> vec;
-  ASSERT_TRUE(vec.Push(NotDefaultConstructible(0)));
-  ASSERT_TRUE(vec.Push(NotDefaultConstructible(1)));
-  ASSERT_TRUE(vec.Push(NotDefaultConstructible(2)));
-  ASSERT_TRUE(vec.Push(NotDefaultConstructible(3)));
-  EXPECT_EQ(vec.size(), 4u);
-  EXPECT_EQ(0u, vec[0].array.size());
-  EXPECT_EQ(1u, vec[1].array.size());
-  EXPECT_EQ(2u, vec[2].array.size());
-  EXPECT_EQ(3u, vec[3].array.size());
-}
-
-TEST(VectorDeathTest, BoundsChecks) {
-  Vector<int> vec;
-  ASSERT_TRUE(vec.Push(1));
-  // Within bounds of the capacity, but not the vector.
-  EXPECT_DEATH_IF_SUPPORTED(vec[1], "");
-  // Not within bounds of the capacity either.
-  EXPECT_DEATH_IF_SUPPORTED(vec[10000], "");
-}
-
-TEST(InplaceVector, Basic) {
-  InplaceVector<int, 4> vec;
-  EXPECT_TRUE(vec.empty());
-  EXPECT_EQ(0u, vec.size());
-  EXPECT_EQ(vec.begin(), vec.end());
-
-  int data3[] = {1, 2, 3};
-  ASSERT_TRUE(vec.TryCopyFrom(data3));
-  EXPECT_FALSE(vec.empty());
-  EXPECT_EQ(3u, vec.size());
-  auto iter = vec.begin();
-  EXPECT_EQ(1, vec[0]);
-  EXPECT_EQ(1, *iter);
-  iter++;
-  EXPECT_EQ(2, vec[1]);
-  EXPECT_EQ(2, *iter);
-  iter++;
-  EXPECT_EQ(3, vec[2]);
-  EXPECT_EQ(3, *iter);
-  iter++;
-  EXPECT_EQ(iter, vec.end());
-  EXPECT_EQ(Span(vec), Span(data3));
-
-  InplaceVector<int, 4> vec2 = vec;
-  EXPECT_EQ(Span(vec), Span(vec2));
-
-  InplaceVector<int, 4> vec3;
-  vec3 = vec;
-  EXPECT_EQ(Span(vec), Span(vec2));
-
-  int data4[] = {1, 2, 3, 4};
-  ASSERT_TRUE(vec.TryCopyFrom(data4));
-  EXPECT_EQ(Span(vec), Span(data4));
-
-  int data5[] = {1, 2, 3, 4, 5};
-  EXPECT_FALSE(vec.TryCopyFrom(data5));
-  EXPECT_FALSE(vec.TryResize(5));
-
-  // Shrink the vector.
-  ASSERT_TRUE(vec.TryResize(3));
-  EXPECT_EQ(Span(vec), Span(data3));
-
-  // Enlarge it again. The new value should have been value-initialized.
-  ASSERT_TRUE(vec.TryResize(4));
-  EXPECT_EQ(vec[3], 0);
-
-  // Self-assignment should not break the vector. Indirect through a pointer to
-  // avoid tripping a compiler warning.
-  vec.CopyFrom(data4);
-  const auto *ptr = &vec;
-  vec = *ptr;
-  EXPECT_EQ(Span(vec), Span(data4));
-}
-
-TEST(InplaceVectorTest, ComplexType) {
-  InplaceVector<std::vector<int>, 4> vec_of_vecs;
-  const std::vector<int> data[] = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}};
-  vec_of_vecs.CopyFrom(data);
-  EXPECT_EQ(Span(vec_of_vecs), Span(data));
-
-  vec_of_vecs.Resize(2);
-  EXPECT_EQ(Span(vec_of_vecs), Span(data, 2));
-
-  vec_of_vecs.Resize(4);
-  EXPECT_EQ(4u, vec_of_vecs.size());
-  EXPECT_EQ(vec_of_vecs[0], data[0]);
-  EXPECT_EQ(vec_of_vecs[1], data[1]);
-  EXPECT_TRUE(vec_of_vecs[2].empty());
-  EXPECT_TRUE(vec_of_vecs[3].empty());
-
-  // Copy-construction.
-  InplaceVector<std::vector<int>, 4> vec_of_vecs2 = vec_of_vecs;
-  EXPECT_EQ(4u, vec_of_vecs2.size());
-  EXPECT_EQ(vec_of_vecs2[0], data[0]);
-  EXPECT_EQ(vec_of_vecs2[1], data[1]);
-  EXPECT_TRUE(vec_of_vecs2[2].empty());
-  EXPECT_TRUE(vec_of_vecs2[3].empty());
-
-  // Copy-assignment.
-  InplaceVector<std::vector<int>, 4> vec_of_vecs3;
-  vec_of_vecs3 = vec_of_vecs;
-  EXPECT_EQ(4u, vec_of_vecs3.size());
-  EXPECT_EQ(vec_of_vecs3[0], data[0]);
-  EXPECT_EQ(vec_of_vecs3[1], data[1]);
-  EXPECT_TRUE(vec_of_vecs3[2].empty());
-  EXPECT_TRUE(vec_of_vecs3[3].empty());
-
-  // Move-construction.
-  InplaceVector<std::vector<int>, 4> vec_of_vecs4 = std::move(vec_of_vecs);
-  EXPECT_EQ(4u, vec_of_vecs4.size());
-  EXPECT_EQ(vec_of_vecs4[0], data[0]);
-  EXPECT_EQ(vec_of_vecs4[1], data[1]);
-  EXPECT_TRUE(vec_of_vecs4[2].empty());
-  EXPECT_TRUE(vec_of_vecs4[3].empty());
-
-  // The elements of the original vector should have been moved-from.
-  EXPECT_EQ(4u, vec_of_vecs.size());
-  for (const auto &vec : vec_of_vecs) {
-    EXPECT_TRUE(vec.empty());
-  }
-
-  // Move-assignment.
-  InplaceVector<std::vector<int>, 4> vec_of_vecs5;
-  vec_of_vecs5 = std::move(vec_of_vecs4);
-  EXPECT_EQ(4u, vec_of_vecs5.size());
-  EXPECT_EQ(vec_of_vecs5[0], data[0]);
-  EXPECT_EQ(vec_of_vecs5[1], data[1]);
-  EXPECT_TRUE(vec_of_vecs5[2].empty());
-  EXPECT_TRUE(vec_of_vecs5[3].empty());
-
-  // The elements of the original vector should have been moved-from.
-  EXPECT_EQ(4u, vec_of_vecs4.size());
-  for (const auto &vec : vec_of_vecs4) {
-    EXPECT_TRUE(vec.empty());
-  }
-
-  std::vector<int> v = {42};
-  vec_of_vecs5.Resize(3);
-  EXPECT_TRUE(vec_of_vecs5.TryPushBack(v));
-  EXPECT_EQ(v, vec_of_vecs5[3]);
-  EXPECT_FALSE(vec_of_vecs5.TryPushBack(v));
-}
-
-TEST(InplaceVectorTest, EraseIf) {
-  // Test that EraseIf never causes a self-move, and also correctly works with
-  // a move-only type that cannot be default-constructed.
-  class NoSelfMove {
-   public:
-    explicit NoSelfMove(int v) : v_(std::make_unique<int>(v)) {}
-    NoSelfMove(NoSelfMove &&other) { *this = std::move(other); }
-    NoSelfMove &operator=(NoSelfMove &&other) {
-      BSSL_CHECK(this != &other);
-      v_ = std::move(other.v_);
-      return *this;
-    }
-
-    int value() const { return *v_; }
-
-   private:
-    std::unique_ptr<int> v_;
-  };
-
-  InplaceVector<NoSelfMove, 8> vec;
-  auto reset = [&] {
-    vec.clear();
-    for (int i = 0; i < 8; i++) {
-      vec.PushBack(NoSelfMove(i));
-    }
-  };
-  auto expect = [&](const std::vector<int> &expected) {
-    ASSERT_EQ(vec.size(), expected.size());
-    for (size_t i = 0; i < vec.size(); i++) {
-      SCOPED_TRACE(i);
-      EXPECT_EQ(vec[i].value(), expected[i]);
-    }
-  };
-
-  reset();
-  vec.EraseIf([](const auto &) { return false; });
-  expect({0, 1, 2, 3, 4, 5, 6, 7});
-
-  reset();
-  vec.EraseIf([](const auto &) { return true; });
-  expect({});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() < 4; });
-  expect({4, 5, 6, 7});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() >= 4; });
-  expect({0, 1, 2, 3});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() % 2 == 0; });
-  expect({1, 3, 5, 7});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() % 2 == 1; });
-  expect({0, 2, 4, 6});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return 2 <= v.value() && v.value() <= 5; });
-  expect({0, 1, 6, 7});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() == 0; });
-  expect({1, 2, 3, 4, 5, 6, 7});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() == 4; });
-  expect({0, 1, 2, 3, 5, 6, 7});
-
-  reset();
-  vec.EraseIf([](const auto &v) { return v.value() == 7; });
-  expect({0, 1, 2, 3, 4, 5, 6});
-}
-
-TEST(InplaceVectorDeathTest, BoundsChecks) {
-  InplaceVector<int, 4> vec;
-  // The vector is currently empty.
-  EXPECT_DEATH_IF_SUPPORTED(vec[0], "");
-  int data[] = {1, 2, 3};
-  vec.CopyFrom(data);
-  // Some more out-of-bounds elements.
-  EXPECT_DEATH_IF_SUPPORTED(vec[3], "");
-  EXPECT_DEATH_IF_SUPPORTED(vec[4], "");
-  EXPECT_DEATH_IF_SUPPORTED(vec[1000], "");
-  // The vector cannot be resized past the capacity.
-  EXPECT_DEATH_IF_SUPPORTED(vec.Resize(5), "");
-  EXPECT_DEATH_IF_SUPPORTED(vec.ResizeForOverwrite(5), "");
-  int too_much_data[] = {1, 2, 3, 4, 5};
-  EXPECT_DEATH_IF_SUPPORTED(vec.CopyFrom(too_much_data), "");
-  vec.Resize(4);
-  EXPECT_DEATH_IF_SUPPORTED(vec.PushBack(42), "");
-}
 
 TEST(ReconstructSeqnumTest, Increment) {
   // Test simple cases from the beginning of an epoch with both 8- and 16-bit
@@ -481,9 +144,9 @@ TEST(ReconstructSeqnumTest, Halfway) {
 }
 
 TEST(DTLSMessageBitmapTest, Basic) {
-  // expect_bitmap checks that |b|'s unmarked bits are those listed in |ranges|.
-  // Each element of |ranges| must be non-empty and non-overlapping, and
-  // |ranges| must be sorted.
+  // expect_bitmap checks that `b`'s unmarked bits are those listed in `ranges`.
+  // Each element of `ranges` must be non-empty and non-overlapping, and
+  // `ranges` must be sorted.
   auto expect_bitmap = [](const DTLSMessageBitmap &b,
                           const std::vector<DTLSMessageBitmap::Range> &ranges) {
     EXPECT_EQ(ranges.empty(), b.IsComplete());
@@ -673,19 +336,16 @@ TEST(MRUQueueTest, Basic) {
   expect_queue({1, 2, 3});
 }
 
-#if !defined(BORINGSSL_UNSAFE_FUZZER_MODE)
 TEST(SSLAEADContextTest, Lengths) {
   struct LengthTest {
-    // All plaintext lengths from |min_plaintext_len| to |max_plaintext_len|
-    // should return in |cipertext_len|.
+    // All plaintext lengths from `min_plaintext_len` to `max_plaintext_len`
+    // should return in `cipertext_len`.
     size_t min_plaintext_len;
     size_t max_plaintext_len;
     size_t ciphertext_len;
   };
 
   struct CipherLengthTest {
-    // |SSL3_CK_*| and |TLS1_CK_*| constants include an extra byte at the front,
-    // so these constants must be masked with 0xffff.
     uint16_t cipher;
     uint16_t version;
     size_t enc_key_len, mac_key_len, fixed_iv_len;
@@ -696,7 +356,7 @@ TEST(SSLAEADContextTest, Lengths) {
   const CipherLengthTest kTests[] = {
       // 20-byte MAC, 8-byte CBC blocks with padding
       {
-          /*cipher=*/SSL3_CK_RSA_DES_192_CBC3_SHA & 0xffff,
+          /*cipher=*/SSL_CIPHER_RSA_WITH_3DES_EDE_CBC_SHA,
           /*version=*/TLS1_2_VERSION,
           /*enc_key_len=*/24,
           /*mac_key_len=*/20,
@@ -716,7 +376,7 @@ TEST(SSLAEADContextTest, Lengths) {
       },
       // 20-byte MAC, 16-byte CBC blocks with padding
       {
-          /*cipher=*/TLS1_CK_RSA_WITH_AES_128_SHA & 0xffff,
+          /*cipher=*/SSL_CIPHER_RSA_WITH_AES_128_CBC_SHA,
           /*version=*/TLS1_2_VERSION,
           /*enc_key_len=*/16,
           /*mac_key_len=*/20,
@@ -736,7 +396,7 @@ TEST(SSLAEADContextTest, Lengths) {
       },
       // 32-byte MAC, 16-byte CBC blocks with padding
       {
-          /*cipher=*/TLS1_CK_ECDHE_RSA_WITH_AES_128_CBC_SHA256 & 0xffff,
+          /*cipher=*/SSL_CIPHER_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
           /*version=*/TLS1_2_VERSION,
           /*enc_key_len=*/16,
           /*mac_key_len=*/32,
@@ -756,7 +416,7 @@ TEST(SSLAEADContextTest, Lengths) {
       },
       // 8-byte explicit IV, 16-byte tag
       {
-          /*cipher=*/TLS1_CK_ECDHE_RSA_WITH_AES_128_GCM_SHA256 & 0xffff,
+          /*cipher=*/SSL_CIPHER_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
           /*version=*/TLS1_2_VERSION,
           /*enc_key_len=*/16,
           /*mac_key_len=*/0,
@@ -780,7 +440,7 @@ TEST(SSLAEADContextTest, Lengths) {
       // No explicit IV, 16-byte tag. TLS 1.3's padding and record type overhead
       // is added at another layer.
       {
-          /*cipher=*/TLS1_CK_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256 & 0xffff,
+          /*cipher=*/SSL_CIPHER_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
           /*version=*/TLS1_2_VERSION,
           /*enc_key_len=*/32,
           /*mac_key_len=*/0,
@@ -802,7 +462,7 @@ TEST(SSLAEADContextTest, Lengths) {
           },
       },
       {
-          /*cipher=*/TLS1_CK_AES_128_GCM_SHA256 & 0xffff,
+          /*cipher=*/SSL_CIPHER_AES_128_GCM_SHA256,
           /*version=*/TLS1_3_VERSION,
           /*enc_key_len=*/16,
           /*mac_key_len=*/0,
@@ -824,7 +484,7 @@ TEST(SSLAEADContextTest, Lengths) {
           },
       },
       {
-          /*cipher=*/TLS1_CK_CHACHA20_POLY1305_SHA256 & 0xffff,
+          /*cipher=*/SSL_CIPHER_CHACHA20_POLY1305_SHA256,
           /*version=*/TLS1_3_VERSION,
           /*enc_key_len=*/32,
           /*mac_key_len=*/0,
@@ -883,7 +543,74 @@ TEST(SSLAEADContextTest, Lengths) {
     }
   }
 }
-#endif  // !BORINGSSL_UNSAFE_FUZZER_MODE
+
+TEST(SSLBufferTest, EnsureCapBoundary) {
+  SSLBuffer buf;
+  // The maximum safe capacity is 0xffff - (SSL3_ALIGN_PAYLOAD - 1) = 65528.
+  EXPECT_TRUE(buf.EnsureCap(0, 65528));
+
+  // Anything larger should be rejected to prevent uint16_t overflow.
+  EXPECT_FALSE(buf.EnsureCap(0, 65529));
+  EXPECT_TRUE(ErrorEquals(ERR_get_error(), ERR_LIB_SSL, ERR_R_INTERNAL_ERROR));
+}
+
+TEST(SSLTest, ECHPublicName) {
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("")));
+  EXPECT_TRUE(ssl_is_valid_ech_public_name(StringAsBytes("example.com")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes(".example.com")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("example.com.")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("example..com")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("www.-example.com")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("www.example-.com")));
+  EXPECT_FALSE(
+      ssl_is_valid_ech_public_name(StringAsBytes("no_underscores.example")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(
+      StringAsBytes("invalid_chars.\x01.example")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(
+      StringAsBytes("invalid_chars.\xff.example")));
+  static const uint8_t kWithNUL[] = {'t', 'e', 's', 't', 0};
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(kWithNUL));
+
+  // Test an LDH label with every character and the maximum length.
+  EXPECT_TRUE(ssl_is_valid_ech_public_name(StringAsBytes(
+      "abcdefhijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes(
+      "abcdefhijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-01234567899")));
+
+  // Inputs with trailing numeric components are rejected.
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("127.0.0.1")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("example.1")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("example.01")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("example.0x01")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("example.0X01")));
+  // Leading zeros and values that overflow `uint32_t` are still rejected.
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(
+      StringAsBytes("example.123456789000000000000000")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(
+      StringAsBytes("example.012345678900000000000000")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(
+      StringAsBytes("example.0x123456789abcdefABCDEF0")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(
+      StringAsBytes("example.0x0123456789abcdefABCDEF")));
+  // Adding a non-digit or non-hex character makes it a valid DNS name again.
+  // Single-component numbers are rejected.
+  EXPECT_TRUE(
+      ssl_is_valid_ech_public_name(StringAsBytes("example.1234567890a")));
+  EXPECT_TRUE(
+      ssl_is_valid_ech_public_name(StringAsBytes("example.01234567890a")));
+  EXPECT_TRUE(ssl_is_valid_ech_public_name(
+      StringAsBytes("example.0x123456789abcdefg")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("1")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("01")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("0x01")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("0X01")));
+  // Numbers with trailing dots are rejected. (They are already rejected by the
+  // LDH label rules, but the WHATWG URL parser additionally rejects them.)
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("1.")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("01.")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("0x01.")));
+  EXPECT_FALSE(ssl_is_valid_ech_public_name(StringAsBytes("0X01.")));
+}
 
 }  // namespace
 BSSL_NAMESPACE_END

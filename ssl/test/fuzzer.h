@@ -20,10 +20,12 @@
 #include <string.h>
 
 #include <algorithm>
+#include <iterator>
 #include <vector>
 
 #include <openssl/bio.h>
 #include <openssl/bytestring.h>
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hpke.h>
@@ -34,6 +36,13 @@
 
 #include "../../crypto/internal.h"
 #include "./fuzzer_tags.h"
+
+#if defined(OPENSSL_WINDOWS)
+// Windows defines struct timeval in winsock2.h.
+#include <winsock2.h>
+#else
+#include <sys/time.h>
+#endif
 
 namespace {
 
@@ -275,10 +284,20 @@ class TLSFuzzer {
     kServer,
   };
 
-  TLSFuzzer(Protocol protocol, Role role)
+  enum FuzzerMode {
+    kFuzzerModeOn,
+    kFuzzerModeOff,
+  };
+
+  TLSFuzzer(Protocol protocol, Role role, FuzzerMode fuzzer_mode)
       : debug_(getenv("BORINGSSL_FUZZER_DEBUG") != nullptr),
         protocol_(protocol),
         role_(role) {
+#if defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
+    if (fuzzer_mode == kFuzzerModeOn) {
+      CRYPTO_set_fuzzer_mode(1);
+    }
+#endif
     if (!Init()) {
       abort();
     }
@@ -298,7 +317,9 @@ class TLSFuzzer {
   }
 
   int TestOneInput(const uint8_t *buf, size_t len) {
+#if defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
     RAND_reset_for_fuzzing();
+#endif
 
     CBS cbs;
     CBS_init(&cbs, buf, len);
@@ -382,7 +403,7 @@ class TLSFuzzer {
   }
 
  private:
-  // Init initializes |ctx_| with settings common to all inputs.
+  // Init initializes `ctx_` with settings common to all inputs.
   bool Init() {
     ctx_.reset(SSL_CTX_new(protocol_ == kDTLS ? DTLS_method() : TLS_method()));
     bssl::UniquePtr<EVP_PKEY> pkey(EVP_PKEY_new());
@@ -395,7 +416,8 @@ class TLSFuzzer {
     }
 
     const uint8_t *bufp = kCertificateDER;
-    bssl::UniquePtr<X509> cert(d2i_X509(NULL, &bufp, sizeof(kCertificateDER)));
+    bssl::UniquePtr<X509> cert(
+        d2i_X509(nullptr, &bufp, sizeof(kCertificateDER)));
     if (!cert ||
         !SSL_CTX_use_certificate(ctx_.get(), cert.get()) ||
         !SSL_CTX_set_ocsp_response(ctx_.get(), kOCSPResponse,
@@ -404,6 +426,12 @@ class TLSFuzzer {
                                                 sizeof(kSCT))) {
       return false;
     }
+
+    // Use a constant clock.
+    SSL_CTX_set_current_time_cb(ctx_.get(),
+                                [](const SSL *ssl, timeval *out_clock) {
+                                  *out_clock = {1234, 1234};
+                                });
 
     // When accepting peer certificates, allow any certificate.
     SSL_CTX_set_cert_verify_callback(
@@ -425,10 +453,10 @@ class TLSFuzzer {
 
     static const uint16_t kGroups[] = {
         SSL_GROUP_X25519_MLKEM768, SSL_GROUP_X25519_KYBER768_DRAFT00,
-        SSL_GROUP_X25519,          SSL_GROUP_SECP256R1,
-        SSL_GROUP_SECP384R1,       SSL_GROUP_SECP521R1};
-    if (!SSL_CTX_set1_group_ids(ctx_.get(), kGroups,
-                                OPENSSL_ARRAY_SIZE(kGroups))) {
+        SSL_GROUP_MLKEM1024,       SSL_GROUP_X25519,
+        SSL_GROUP_SECP256R1,       SSL_GROUP_SECP384R1,
+        SSL_GROUP_SECP521R1};
+    if (!SSL_CTX_set1_group_ids(ctx_.get(), kGroups, std::size(kGroups))) {
       return false;
     }
 
@@ -460,7 +488,7 @@ class TLSFuzzer {
       if (!keys ||
           !EVP_HPKE_KEY_init(key.get(), EVP_hpke_x25519_hkdf_sha256(), kECHKey,
                              sizeof(kECHKey)) ||
-          // Match |echConfig| in |addEncryptedClientHelloTests| from runner.go.
+          // Match `echConfig` in `addEncryptedClientHelloTests` from runner.go.
           !SSL_marshal_ech_config(&ech_config, &ech_config_len,
                                   /*config_id=*/42, key.get(), "public.example",
                                   /*max_name_len=*/64)) {
@@ -477,11 +505,11 @@ class TLSFuzzer {
     return true;
   }
 
-  // SetupTest parses parameters from |cbs| and returns a newly-configured |SSL|
+  // SetupTest parses parameters from `cbs` and returns a newly-configured `SSL`
   // object or nullptr on error. On success, the caller should feed the
-  // remaining input in |cbs| to the SSL stack.
+  // remaining input in `cbs` to the SSL stack.
   bssl::UniquePtr<SSL> SetupTest(CBS *cbs) {
-    // |ctx| is shared between runs, so we must clear any modifications to it
+    // `ctx` is shared between runs, so we must clear any modifications to it
     // made later on in this function.
     SSL_CTX_flush_sessions(ctx_.get(), 0);
     handoff_ = {};
@@ -576,15 +604,14 @@ class TLSFuzzer {
     b->protocol = protocol_;
     CBS_init(&b->cbs, in, len);
 
-    bssl::UniquePtr<BIO> bio(BIO_new(&kBIOMethod));
-    bio->init = 1;
-    bio->ptr = b;
+    bssl::UniquePtr<BIO> bio(BIO_new(BIOMethod()));
+    BIO_set_init(bio.get(), 1);
+    BIO_set_data(bio.get(), b);
     return bio;
   }
 
   static int BIORead(BIO *bio, char *out, int len) {
-    assert(bio->method == &kBIOMethod);
-    BIOData *b = reinterpret_cast<BIOData *>(bio->ptr);
+    BIOData *b = reinterpret_cast<BIOData *>(BIO_get_data(bio));
     if (b->protocol == kTLS) {
       len = std::min(static_cast<size_t>(len), CBS_len(&b->cbs));
       memcpy(out, CBS_data(&b->cbs), len);
@@ -603,32 +630,27 @@ class TLSFuzzer {
   }
 
   static int BIODestroy(BIO *bio) {
-    assert(bio->method == &kBIOMethod);
-    BIOData *b = reinterpret_cast<BIOData *>(bio->ptr);
+    BIOData *b = reinterpret_cast<BIOData *>(BIO_get_data(bio));
     delete b;
     return 1;
   }
 
-  static const BIO_METHOD kBIOMethod;
+  static const BIO_METHOD *BIOMethod() {
+    static const BIO_METHOD *method = [] {
+      BIO_METHOD *ret = BIO_meth_new(0, nullptr);
+      BSSL_CHECK(ret);
+      BSSL_CHECK(BIO_meth_set_read(ret, BIORead));
+      BSSL_CHECK(BIO_meth_set_destroy(ret, BIODestroy));
+      return ret;
+    }();
+    return method;
+  }
 
   bool debug_;
   Protocol protocol_;
   Role role_;
   bssl::UniquePtr<SSL_CTX> ctx_;
   std::vector<uint8_t> handoff_, handback_;
-};
-
-const BIO_METHOD TLSFuzzer::kBIOMethod = {
-    0,        // type
-    nullptr,  // name
-    nullptr,  // bwrite
-    TLSFuzzer::BIORead,
-    nullptr,  // bputs
-    nullptr,  // bgets
-    nullptr,  // ctrl
-    nullptr,  // create
-    TLSFuzzer::BIODestroy,
-    nullptr,  // callback_ctrl
 };
 
 }  // namespace

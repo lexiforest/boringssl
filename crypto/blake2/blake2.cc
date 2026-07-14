@@ -16,7 +16,11 @@
 
 #include <assert.h>
 
+#include <iterator>
+
 #include "../internal.h"
+
+using namespace bssl;
 
 // https://tools.ietf.org/html/rfc7693#section-2.6
 static const uint64_t kIV[8] = {
@@ -64,7 +68,7 @@ static void blake2b_transform(BLAKE2B_CTX *b2b,
                               size_t num_bytes, int is_final_block) {
   // https://tools.ietf.org/html/rfc7693#section-3.2
   uint64_t v[16];
-  static_assert(sizeof(v) == sizeof(b2b->h) + sizeof(kIV), "");
+  static_assert(sizeof(v) == sizeof(b2b->h) + sizeof(kIV));
   OPENSSL_memcpy(v, b2b->h, sizeof(b2b->h));
   OPENSSL_memcpy(&v[8], kIV, sizeof(kIV));
 
@@ -99,7 +103,7 @@ static void blake2b_transform(BLAKE2B_CTX *b2b,
                 blake2b_load(block, s[15]));
   }
 
-  for (size_t i = 0; i < OPENSSL_ARRAY_SIZE(b2b->h); i++) {
+  for (size_t i = 0; i < std::size(b2b->h); i++) {
     b2b->h[i] ^= v[i];
     b2b->h[i] ^= v[i + 8];
   }
@@ -108,7 +112,7 @@ static void blake2b_transform(BLAKE2B_CTX *b2b,
 void BLAKE2B256_Init(BLAKE2B_CTX *b2b) {
   OPENSSL_memset(b2b, 0, sizeof(BLAKE2B_CTX));
 
-  static_assert(sizeof(kIV) == sizeof(b2b->h), "");
+  static_assert(sizeof(kIV) == sizeof(b2b->h));
   OPENSSL_memcpy(&b2b->h, kIV, sizeof(kIV));
 
   // https://tools.ietf.org/html/rfc7693#section-2.5
@@ -135,7 +139,7 @@ void BLAKE2B256_Update(BLAKE2B_CTX *b2b, const void *in_data, size_t len) {
     return;
   }
 
-  // More input remains therefore we must have filled |b2b->block|.
+  // More input remains therefore we must have filled `b2b->block`.
   assert(b2b->block_used == BLAKE2B_CBLOCK);
   blake2b_transform(b2b, b2b->block, BLAKE2B_CBLOCK,
                     /*is_final_block=*/0);
@@ -156,7 +160,7 @@ void BLAKE2B256_Final(uint8_t out[BLAKE2B256_DIGEST_LENGTH], BLAKE2B_CTX *b2b) {
                  sizeof(b2b->block) - b2b->block_used);
   blake2b_transform(b2b, b2b->block, b2b->block_used,
                     /*is_final_block=*/1);
-  static_assert(BLAKE2B256_DIGEST_LENGTH <= sizeof(b2b->h), "");
+  static_assert(BLAKE2B256_DIGEST_LENGTH <= sizeof(b2b->h));
   memcpy(out, b2b->h, BLAKE2B256_DIGEST_LENGTH);
 }
 

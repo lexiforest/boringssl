@@ -12,26 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef OPENSSL_HEADER_MD5_INTERNAL_H
-#define OPENSSL_HEADER_MD5_INTERNAL_H
+#ifndef OPENSSL_HEADER_CRYPTO_MD5_INTERNAL_H
+#define OPENSSL_HEADER_CRYPTO_MD5_INTERNAL_H
 
 #include <openssl/base.h>
 
-#if defined(__cplusplus)
-extern "C" {
-#endif
+#include "../internal.h"
 
+
+BSSL_NAMESPACE_BEGIN
 
 #if !defined(OPENSSL_NO_ASM) && \
     (defined(OPENSSL_X86_64) || defined(OPENSSL_X86))
 #define MD5_ASM
-extern void md5_block_asm_data_order(uint32_t *state, const uint8_t *data,
-                                     size_t num);
+extern "C" void md5_block_asm_data_order(uint32_t *state, const uint8_t *data,
+                                         size_t num);
 #endif
 
+BSSL_NAMESPACE_END
 
-#if defined(__cplusplus)
-}  // extern "C"
-#endif
-
-#endif  // OPENSSL_HEADER_MD5_INTERNAL_H
+#endif  // OPENSSL_HEADER_CRYPTO_MD5_INTERNAL_H

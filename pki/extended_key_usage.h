@@ -78,13 +78,31 @@ inline constexpr uint8_t kTimeStamping[] = {0x2b, 0x06, 0x01, 0x05,
 inline constexpr uint8_t kOCSPSigning[] = {0x2b, 0x06, 0x01, 0x05,
                                            0x05, 0x07, 0x03, 0x09};
 
-// Parses |extension_value|, which contains the extnValue field of an X.509v3
-// Extended Key Usage extension, and populates |eku_oids| with the list of
+// From RFC 9336 section 3.1:
+// id-kp-documentSigning  OBJECT IDENTIFIER  ::=  { id-kp 36 }
+// In dotted notation: 1.3.6.1.5.5.7.3.36
+inline constexpr uint8_t kDocumentSigning[] = {0x2b, 0x06, 0x01, 0x05,
+                                               0x05, 0x07, 0x03, 0x24};
+
+// From GSMA RCC.16 v1.0 End-to-End Encryption Specification.
+// id-gsmaRCSE2EE OBJECT IDENTIFIER ::=  { joint-iso-itu-t(2)
+// international-organizations(23) gsma(146) rcs(2) rcsE2EE (1)}
+// (Note this spec incorrectly says id-appleDraftRCSE2EE in place of
+// id-gmsaRCSE2EE in several places)
+//
+// From GSMA RCC.16 v1.0 End-to-End Encryption Specification section A.2.8.8,
+// and A.3.8.7.
+// id-kp-rcsMlsClient OBJECT IDENTIFIER ::= { id-gmsaRCS2EE 3 }
+// In dotted notation: 2.23.146.2.1.3
+inline constexpr uint8_t kRcsMlsClient[] = {0x67, 0x81, 0x12, 0x02, 0x01, 0x03};
+
+// Parses `extension_value`, which contains the extnValue field of an X.509v3
+// Extended Key Usage extension, and populates `eku_oids` with the list of
 // DER-encoded OID values (that is, without tag and length). Returns false if
-// |extension_value| is improperly encoded.
+// `extension_value` is improperly encoded.
 //
 // Note: The returned OIDs are only as valid as long as the data pointed to by
-// |extension_value| is valid.
+// `extension_value` is valid.
 OPENSSL_EXPORT bool ParseEKUExtension(der::Input extension_value,
                                       std::vector<der::Input> *eku_oids);
 

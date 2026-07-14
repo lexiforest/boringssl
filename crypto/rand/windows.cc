@@ -16,16 +16,16 @@
 
 #include "../bcm_support.h"
 #include "../internal.h"
-#include "sysrand_internal.h"
+#include "internal.h"
 
 #if defined(OPENSSL_RAND_WINDOWS)
 
 #include <limits.h>
 #include <stdlib.h>
 
-OPENSSL_MSVC_PRAGMA(warning(push, 3))
-
 #include <windows.h>
+
+using namespace bssl;
 
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP) && \
     !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
@@ -33,21 +33,19 @@ OPENSSL_MSVC_PRAGMA(warning(push, 3))
 OPENSSL_MSVC_PRAGMA(comment(lib, "bcrypt.lib"))
 #endif  // WINAPI_PARTITION_APP && !WINAPI_PARTITION_DESKTOP
 
-OPENSSL_MSVC_PRAGMA(warning(pop))
-
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_APP) && \
     !WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
 
-void CRYPTO_init_sysrand(void) {}
+void bssl::CRYPTO_init_sysrand() {}
 
-void CRYPTO_sysrand(uint8_t *out, size_t requested) {
+void bssl::CRYPTO_sysrand(uint8_t *out, size_t requested) {
   while (requested > 0) {
     ULONG output_bytes_this_pass = ULONG_MAX;
     if (requested < output_bytes_this_pass) {
       output_bytes_this_pass = (ULONG)requested;
     }
     if (!BCRYPT_SUCCESS(BCryptGenRandom(
-            /*hAlgorithm=*/NULL, out, output_bytes_this_pass,
+            /*hAlgorithm=*/nullptr, out, output_bytes_this_pass,
             BCRYPT_USE_SYSTEM_PREFERRED_RNG))) {
       abort();
     }
@@ -59,36 +57,36 @@ void CRYPTO_sysrand(uint8_t *out, size_t requested) {
 #else
 
 // See: https://learn.microsoft.com/en-us/windows/win32/seccng/processprng
-typedef BOOL (WINAPI *ProcessPrngFunction)(PBYTE pbData, SIZE_T cbData);
-static ProcessPrngFunction g_processprng_fn = NULL;
+typedef BOOL(WINAPI *ProcessPrngFunction)(PBYTE pbData, SIZE_T cbData);
+static ProcessPrngFunction g_processprng_fn = nullptr;
 
 typedef BOOL(WINAPI *RtlGenRandomFunction)(PVOID RandomBuffer, ULONG RandomBufferLength);
-static RtlGenRandomFunction g_rtlgenrandom_fn = NULL;
+static RtlGenRandomFunction g_rtlgenrandom_fn = nullptr;
 
-static void init_processprng(void) {
+static void init_processprng() {
   HMODULE hmod = LoadLibraryW(L"bcryptprimitives");
-  if (hmod == NULL) {
+  if (hmod == nullptr) {
     abort();
   }
   g_processprng_fn = (ProcessPrngFunction)GetProcAddress(hmod, "ProcessPrng");
-  if (g_processprng_fn == NULL) {
+  if (g_processprng_fn == nullptr) {
     hmod = LoadLibraryW(L"advapi32");
-    if (hmod == NULL) {
+    if (hmod == nullptr) {
       abort();
     }
     g_rtlgenrandom_fn = (RtlGenRandomFunction)GetProcAddress(hmod, "SystemFunction036");
-    if (g_rtlgenrandom_fn == NULL) {
+    if (g_rtlgenrandom_fn == nullptr) {
       abort();
     }
   }
 }
 
-void CRYPTO_init_sysrand(void) {
+void bssl::CRYPTO_init_sysrand() {
   static CRYPTO_once_t once = CRYPTO_ONCE_INIT;
   CRYPTO_once(&once, init_processprng);
 }
 
-void CRYPTO_sysrand(uint8_t *out, size_t requested) {
+void bssl::CRYPTO_sysrand(uint8_t *out, size_t requested) {
   CRYPTO_init_sysrand();
   // On non-UWP configurations, use ProcessPrng instead of BCryptGenRandom
   // to avoid accessing resources that may be unavailable inside the
@@ -113,14 +111,5 @@ void CRYPTO_sysrand(uint8_t *out, size_t requested) {
 }
 
 #endif  // WINAPI_PARTITION_APP && !WINAPI_PARTITION_DESKTOP
-
-int CRYPTO_sysrand_if_available(uint8_t *buf, size_t len) {
-  CRYPTO_sysrand(buf, len);
-  return 1;
-}
-
-void CRYPTO_sysrand_for_seed(uint8_t *out, size_t requested) {
-  CRYPTO_sysrand(out, requested);
-}
 
 #endif  // OPENSSL_RAND_WINDOWS

@@ -1,6 +1,7 @@
+#define BORINGSSL_ALWAYS_USE_STATIC_INLINE
+
 #include <openssl/aes.h>
 #include <openssl/asn1.h>
-#include <openssl/asn1_mac.h>
 #include <openssl/asn1t.h>
 #include <openssl/base.h>
 #include <openssl/base64.h>
@@ -65,6 +66,7 @@
 #include <openssl/rsa.h>
 #include <openssl/safestack.h>
 #include <openssl/sha.h>
+#include <openssl/sha2.h>
 #include <openssl/siphash.h>
 #include <openssl/slhdsa.h>
 #include <openssl/span.h>
@@ -74,9 +76,8 @@
 #include <openssl/stack.h>
 #include <openssl/thread.h>
 #include <openssl/tls1.h>
+#include <openssl/tls_prf.h>
 #include <openssl/trust_token.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
 #include <openssl/x509v3.h>
-
-#include "rust_wrapper.h"

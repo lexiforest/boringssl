@@ -17,7 +17,7 @@ _CRYPTO_rdrand:
 
 _CET_ENDBR
 	xorq	%rax,%rax
-.byte	72,15,199,242
+	rdrand	%rdx
 
 	adcq	%rax,%rax
 	movq	%rdx,0(%rdi)
@@ -33,6 +33,7 @@ _CET_ENDBR
 .private_extern _CRYPTO_rdrand_multiple8_buf
 
 .p2align	4
+.alt_entry _CRYPTO_rdrand_multiple8_buf
 _CRYPTO_rdrand_multiple8_buf:
 
 _CET_ENDBR
@@ -40,7 +41,7 @@ _CET_ENDBR
 	jz	L$out
 	movq	$8,%rdx
 L$loop:
-.byte	72,15,199,241
+	rdrand	%rcx
 	jnc	L$err
 	movq	%rcx,0(%rdi)
 	addq	%rdx,%rdi

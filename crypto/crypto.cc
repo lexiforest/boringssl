@@ -22,6 +22,8 @@
 #include "internal.h"
 
 
+using namespace bssl;
+
 static_assert(sizeof(ossl_ssize_t) == sizeof(size_t),
               "ossl_ssize_t should be the same size as size_t");
 
@@ -54,75 +56,42 @@ static_assert(sizeof(ossl_ssize_t) == sizeof(size_t),
 // archive, linking on OS X will fail to resolve common symbols. By
 // initialising it to zero, it becomes a "data symbol", which isn't so
 // affected.
-HIDDEN uint8_t BORINGSSL_function_hit[9] = {0};
+HIDDEN uint8_t bssl::BORINGSSL_function_hit[8] = {0};
 #endif
 
 #if defined(OPENSSL_X86) || defined(OPENSSL_X86_64)
 
 // This value must be explicitly initialized to zero. See similar comment above.
-HIDDEN uint32_t OPENSSL_ia32cap_P[4] = {0};
+HIDDEN uint32_t bssl::OPENSSL_ia32cap_P[4] = {0};
 
-uint32_t OPENSSL_get_ia32cap(int idx) {
+uint32_t bssl::OPENSSL_get_ia32cap(int idx) {
   OPENSSL_init_cpuid();
   return OPENSSL_ia32cap_P[idx];
 }
 
-#elif defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64)
+#elif (defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64)) && \
+    !defined(OPENSSL_STATIC_ARMCAP)
+HIDDEN uint32_t bssl::OPENSSL_armcap_P = 0;
 
-#if defined(OPENSSL_STATIC_ARMCAP)
-
-// See ARM ACLE for the definitions of these macros. Note |__ARM_FEATURE_AES|
-// covers both AES and PMULL and |__ARM_FEATURE_SHA2| covers SHA-1 and SHA-256.
-// https://developer.arm.com/architectures/system-architectures/software-standards/acle
-// https://github.com/ARM-software/acle/issues/152
-//
-// TODO(davidben): Do we still need |OPENSSL_STATIC_ARMCAP_*| or are the
-// standard flags and -march sufficient?
-HIDDEN uint32_t OPENSSL_armcap_P =
-#if defined(OPENSSL_STATIC_ARMCAP_NEON) || defined(__ARM_NEON)
-    ARMV7_NEON |
-#endif
-#if defined(OPENSSL_STATIC_ARMCAP_AES) || defined(__ARM_FEATURE_AES)
-    ARMV8_AES |
-#endif
-#if defined(OPENSSL_STATIC_ARMCAP_PMULL) || defined(__ARM_FEATURE_AES)
-    ARMV8_PMULL |
-#endif
-#if defined(OPENSSL_STATIC_ARMCAP_SHA1) || defined(__ARM_FEATURE_SHA2)
-    ARMV8_SHA1 |
-#endif
-#if defined(OPENSSL_STATIC_ARMCAP_SHA256) || defined(__ARM_FEATURE_SHA2)
-    ARMV8_SHA256 |
-#endif
-#if defined(__ARM_FEATURE_SHA512)
-    ARMV8_SHA512 |
-#endif
-    0;
-
-#else
-HIDDEN uint32_t OPENSSL_armcap_P = 0;
-
-uint32_t *OPENSSL_get_armcap_pointer_for_test(void) {
+uint32_t *bssl::OPENSSL_get_armcap_pointer_for_test() {
   OPENSSL_init_cpuid();
   return &OPENSSL_armcap_P;
 }
-#endif
 
-uint32_t OPENSSL_get_armcap(void) {
+uint32_t bssl::OPENSSL_get_armcap() {
   OPENSSL_init_cpuid();
   return OPENSSL_armcap_P;
 }
-
 #endif
 
 #if defined(NEED_CPUID)
-static CRYPTO_once_t once = CRYPTO_ONCE_INIT;
-void OPENSSL_init_cpuid(void) { CRYPTO_once(&once, OPENSSL_cpuid_setup); }
+static bssl::CRYPTO_once_t once = CRYPTO_ONCE_INIT;
+void bssl::OPENSSL_init_cpuid() { CRYPTO_once(&once, OPENSSL_cpuid_setup); }
 #endif
 
-void CRYPTO_library_init(void) {}
+void CRYPTO_library_init() {}
 
-int CRYPTO_is_confidential_build(void) {
+int CRYPTO_is_confidential_build() {
 #if defined(BORINGSSL_CONFIDENTIAL)
   return 1;
 #else
@@ -130,7 +99,7 @@ int CRYPTO_is_confidential_build(void) {
 #endif
 }
 
-void CRYPTO_pre_sandbox_init(void) {
+void CRYPTO_pre_sandbox_init() {
   // Read from /proc/cpuinfo if needed.
   OPENSSL_init_cpuid();
   // Open /dev/urandom if needed.
@@ -158,24 +127,26 @@ const char *OpenSSL_version(int which) {
   }
 }
 
-unsigned long SSLeay(void) { return OPENSSL_VERSION_NUMBER; }
+unsigned long SSLeay() { return OPENSSL_VERSION_NUMBER; }
 
-unsigned long OpenSSL_version_num(void) { return OPENSSL_VERSION_NUMBER; }
+unsigned long OpenSSL_version_num() { return OPENSSL_VERSION_NUMBER; }
 
-int CRYPTO_malloc_init(void) { return 1; }
+int CRYPTO_malloc_init() { return 1; }
 
-int OPENSSL_malloc_init(void) { return 1; }
+int OPENSSL_malloc_init() { return 1; }
 
-void ENGINE_load_builtin_engines(void) {}
+void ENGINE_load_builtin_engines() {}
 
-int ENGINE_register_all_complete(void) { return 1; }
+int ENGINE_register_all_complete() { return 1; }
 
-void OPENSSL_load_builtin_modules(void) {}
+void ENGINE_cleanup() {}
+
+void OPENSSL_load_builtin_modules() {}
 
 int OPENSSL_init_crypto(uint64_t opts, const OPENSSL_INIT_SETTINGS *settings) {
   return 1;
 }
 
-void OPENSSL_cleanup(void) {}
+void OPENSSL_cleanup() {}
 
-FILE *CRYPTO_get_stderr(void) { return stderr; }
+FILE *bssl::CRYPTO_get_stderr() { return stderr; }

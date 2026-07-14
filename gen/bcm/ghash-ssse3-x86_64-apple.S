@@ -23,7 +23,7 @@ _CET_ENDBR
 	movdqa	L$low4_mask(%rip),%xmm2
 
 
-.byte	102,65,15,56,0,194
+	pshufb	%xmm10,%xmm0
 
 
 	movdqa	%xmm2,%xmm1
@@ -43,7 +43,7 @@ L$oop_row_1:
 
 
 	movdqa	%xmm2,%xmm6
-.byte	102,15,58,15,243,1
+	palignr	$1,%xmm3,%xmm6
 	movdqa	%xmm6,%xmm3
 	psrldq	$1,%xmm2
 
@@ -51,8 +51,8 @@ L$oop_row_1:
 
 
 	movdqa	%xmm4,%xmm5
-.byte	102,15,56,0,224
-.byte	102,15,56,0,233
+	pshufb	%xmm0,%xmm4
+	pshufb	%xmm1,%xmm5
 
 
 	pxor	%xmm5,%xmm2
@@ -91,7 +91,7 @@ L$oop_row_2:
 
 
 	movdqa	%xmm2,%xmm6
-.byte	102,15,58,15,243,1
+	palignr	$1,%xmm3,%xmm6
 	movdqa	%xmm6,%xmm3
 	psrldq	$1,%xmm2
 
@@ -99,8 +99,8 @@ L$oop_row_2:
 
 
 	movdqa	%xmm4,%xmm5
-.byte	102,15,56,0,224
-.byte	102,15,56,0,233
+	pshufb	%xmm0,%xmm4
+	pshufb	%xmm1,%xmm5
 
 
 	pxor	%xmm5,%xmm2
@@ -139,7 +139,7 @@ L$oop_row_3:
 
 
 	movdqa	%xmm2,%xmm6
-.byte	102,15,58,15,243,1
+	palignr	$1,%xmm3,%xmm6
 	movdqa	%xmm6,%xmm3
 	psrldq	$1,%xmm2
 
@@ -147,8 +147,8 @@ L$oop_row_3:
 
 
 	movdqa	%xmm4,%xmm5
-.byte	102,15,56,0,224
-.byte	102,15,56,0,233
+	pshufb	%xmm0,%xmm4
+	pshufb	%xmm1,%xmm5
 
 
 	pxor	%xmm5,%xmm2
@@ -181,7 +181,7 @@ L$oop_row_3:
 	pxor	%xmm3,%xmm2
 	pxor	%xmm3,%xmm3
 
-.byte	102,65,15,56,0,210
+	pshufb	%xmm10,%xmm2
 	movdqu	%xmm2,(%rdi)
 
 
@@ -205,6 +205,7 @@ L$oop_row_3:
 .globl	_gcm_ghash_ssse3
 .private_extern _gcm_ghash_ssse3
 .p2align	4
+.alt_entry _gcm_ghash_ssse3
 _gcm_ghash_ssse3:
 
 
@@ -218,14 +219,14 @@ _CET_ENDBR
 
 
 
-.byte	102,65,15,56,0,194
+	pshufb	%xmm10,%xmm0
 
 
 	pxor	%xmm3,%xmm3
 L$oop_ghash:
 
 	movdqu	(%rdx),%xmm1
-.byte	102,65,15,56,0,202
+	pshufb	%xmm10,%xmm1
 	pxor	%xmm1,%xmm0
 
 
@@ -246,7 +247,7 @@ L$oop_row_4:
 
 
 	movdqa	%xmm2,%xmm6
-.byte	102,15,58,15,243,1
+	palignr	$1,%xmm3,%xmm6
 	movdqa	%xmm6,%xmm3
 	psrldq	$1,%xmm2
 
@@ -254,8 +255,8 @@ L$oop_row_4:
 
 
 	movdqa	%xmm4,%xmm5
-.byte	102,15,56,0,224
-.byte	102,15,56,0,233
+	pshufb	%xmm0,%xmm4
+	pshufb	%xmm1,%xmm5
 
 
 	pxor	%xmm5,%xmm2
@@ -294,7 +295,7 @@ L$oop_row_5:
 
 
 	movdqa	%xmm2,%xmm6
-.byte	102,15,58,15,243,1
+	palignr	$1,%xmm3,%xmm6
 	movdqa	%xmm6,%xmm3
 	psrldq	$1,%xmm2
 
@@ -302,8 +303,8 @@ L$oop_row_5:
 
 
 	movdqa	%xmm4,%xmm5
-.byte	102,15,56,0,224
-.byte	102,15,56,0,233
+	pshufb	%xmm0,%xmm4
+	pshufb	%xmm1,%xmm5
 
 
 	pxor	%xmm5,%xmm2
@@ -342,7 +343,7 @@ L$oop_row_6:
 
 
 	movdqa	%xmm2,%xmm6
-.byte	102,15,58,15,243,1
+	palignr	$1,%xmm3,%xmm6
 	movdqa	%xmm6,%xmm3
 	psrldq	$1,%xmm2
 
@@ -350,8 +351,8 @@ L$oop_row_6:
 
 
 	movdqa	%xmm4,%xmm5
-.byte	102,15,56,0,224
-.byte	102,15,56,0,233
+	pshufb	%xmm0,%xmm4
+	pshufb	%xmm1,%xmm5
 
 
 	pxor	%xmm5,%xmm2
@@ -394,7 +395,7 @@ L$oop_row_6:
 	jnz	L$oop_ghash
 
 
-.byte	102,65,15,56,0,194
+	pshufb	%xmm10,%xmm0
 	movdqu	%xmm0,(%rdi)
 
 
@@ -411,7 +412,9 @@ L$oop_row_6:
 
 
 .section	__DATA,__const
+
 .p2align	4
+ghash_ssse3_constants:
 
 
 L$reverse_bytes:

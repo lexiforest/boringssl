@@ -24,9 +24,7 @@
 #include <openssl/err.h>
 
 #if defined(OPENSSL_WINDOWS)
-OPENSSL_MSVC_PRAGMA(warning(push, 3))
 #include <winsock2.h>
-OPENSSL_MSVC_PRAGMA(warning(pop))
 #else
 #include <signal.h>
 #endif
@@ -78,7 +76,7 @@ inline void SetupGoogleTest() {
   }
 #else
   // Some tests create pipes. We check return values, so avoid being killed by
-  // |SIGPIPE|.
+  // `SIGPIPE`.
   signal(SIGPIPE, SIG_IGN);
 #endif
 

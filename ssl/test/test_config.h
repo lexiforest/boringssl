@@ -29,6 +29,8 @@ enum class CredentialConfigType {
   kX509,
   kDelegated,
   kSPAKE2PlusV1,
+  kPreSharedKey,
+  kRawPublicKey,
 };
 
 struct CredentialConfig {
@@ -44,7 +46,12 @@ struct CredentialConfig {
   std::vector<uint8_t> pake_client_id;
   std::vector<uint8_t> pake_server_id;
   std::vector<uint8_t> pake_password;
+  std::vector<uint8_t> trust_anchor_id;
   bool wrong_pake_role = false;
+  std::vector<uint8_t> psk;
+  std::vector<uint8_t> psk_identity;
+  std::vector<uint8_t> psk_context;
+  const EVP_MD *psk_hash;
 };
 
 struct TestConfig {
@@ -56,11 +63,17 @@ struct TestConfig {
   bool is_quic = false;
   int resume_count = 0;
   std::string write_settings;
+#if defined(FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION)
+  bool fuzzer_mode = false;
+#endif
   bool fallback_scsv = false;
   std::vector<uint16_t> signing_prefs;
   std::vector<uint16_t> verify_prefs;
   std::vector<uint16_t> expect_peer_verify_prefs;
   std::vector<uint16_t> curves;
+  std::vector<uint32_t> curves_flags;
+  std::optional<std::vector<uint16_t>> key_shares;
+  std::vector<uint16_t> server_supported_groups_hint;
   std::string key_file;
   std::string cert_file;
   std::string trust_cert;
@@ -93,10 +106,13 @@ struct TestConfig {
   bool no_tls11 = false;
   bool no_tls1 = false;
   bool no_ticket = false;
+  bool no_legacy_server_connect = false;
   std::vector<uint8_t> expect_channel_id;
   bool enable_channel_id = false;
   std::string send_channel_id;
   bool shim_writes_first = false;
+  std::string shim_initial_write = "hello";
+  int repeat_shim_initial_write = 1;
   std::string host_name;
   std::string advertise_alpn;
   std::string expect_alpn;
@@ -108,7 +124,7 @@ struct TestConfig {
   bool defer_alps = false;
   std::vector<std::pair<std::string, std::string>> application_settings;
   std::optional<std::string> expect_peer_application_settings;
-  bool alps_use_new_codepoint = false;
+  int alps_use_new_codepoint = 1;
   std::vector<uint8_t> quic_transport_params;
   std::vector<uint8_t> expect_quic_transport_params;
   // Set quic_use_legacy_codepoint to 0 or 1 to configure, -1 uses default.
@@ -181,6 +197,7 @@ struct TestConfig {
   uint16_t expect_cipher_aes = 0;
   uint16_t expect_cipher_no_aes = 0;
   uint16_t expect_cipher = 0;
+  bool expect_no_peer_cert = false;
   std::string expect_peer_cert_file;
   int resumption_delay = 0;
   bool retain_only_sha256_client_cert = false;
@@ -209,8 +226,6 @@ struct TestConfig {
   bool install_cert_compression_algs = false;
   int install_one_cert_compression_alg = 0;
   bool reverify_on_resume = false;
-  bool ignore_rsa_key_usage = false;
-  bool expect_key_usage_invalid = false;
   bool is_handshaker_supported = false;
   bool handshaker_resume = false;
   std::string handshaker_path;
@@ -228,9 +243,25 @@ struct TestConfig {
   bool fips_202205 = false;
   bool wpa_202304 = false;
   bool cnsa_202407 = false;
+  bool cnsa1_202603 = false;
+  bool cnsa2_202603 = false;
+  std::optional<bool> expect_peer_match_trust_anchor;
+  std::optional<std::vector<uint8_t>> expect_peer_available_trust_anchors;
+  std::optional<std::vector<uint8_t>> requested_trust_anchors;
+  std::vector<uint8_t> available_trust_anchors;
   std::optional<int> expect_selected_credential;
   std::vector<CredentialConfig> credentials;
   int private_key_delay_ms = 0;
+  bool resumption_across_names_enabled = false;
+  std::optional<bool> expect_resumable_across_names;
+  bool no_server_name_ack = false;
+  std::vector<uint8_t> accepted_peer_cert_types;
+  std::vector<uint8_t> available_client_cert_types;
+  std::optional<uint8_t> expect_peer_certificate_type;
+  std::vector<uint8_t> expect_peer_rpk_sha256;
+  std::optional<uint16_t> request_server_padding;
+  bool expect_server_sent_requested_padding = false;
+  bool server_supports_padding = false;
 
   std::vector<const char *> handshaker_args;
 

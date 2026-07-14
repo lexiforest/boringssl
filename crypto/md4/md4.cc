@@ -17,9 +17,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <openssl/span.h>
+
 #include "../fipsmodule/digest/md32_common.h"
 #include "../internal.h"
 
+
+using namespace bssl;
 
 uint8_t *MD4(const uint8_t *data, size_t len, uint8_t out[MD4_DIGEST_LENGTH]) {
   MD4_CTX ctx;
@@ -48,17 +52,26 @@ void MD4_Transform(MD4_CTX *c, const uint8_t data[MD4_CBLOCK]) {
   md4_block_data_order(c->h, data, 1);
 }
 
+namespace {
+struct MD4Traits {
+  using HashContext = MD4_CTX;
+  static constexpr size_t kBlockSize = MD4_CBLOCK;
+  static constexpr bool kLengthIsBigEndian = false;
+  static void HashBlocks(uint32_t *state, const uint8_t *data,
+                         size_t num_blocks) {
+    md4_block_data_order(state, data, num_blocks);
+  }
+};
+}  // namespace
+
 int MD4_Update(MD4_CTX *c, const void *data, size_t len) {
-  crypto_md32_update(&md4_block_data_order, c->h, c->data, MD4_CBLOCK, &c->num,
-                     &c->Nh, &c->Nl, reinterpret_cast<const uint8_t *>(data),
-                     len);
+  crypto_md32_update<MD4Traits>(c,
+                                Span(static_cast<const uint8_t *>(data), len));
   return 1;
 }
 
 int MD4_Final(uint8_t out[MD4_DIGEST_LENGTH], MD4_CTX *c) {
-  crypto_md32_final(&md4_block_data_order, c->h, c->data, MD4_CBLOCK, &c->num,
-                    c->Nh, c->Nl, /*is_big_endian=*/0);
-
+  crypto_md32_final<MD4Traits>(c);
   CRYPTO_store_u32_le(out, c->h[0]);
   CRYPTO_store_u32_le(out + 4, c->h[1]);
   CRYPTO_store_u32_le(out + 8, c->h[2]);

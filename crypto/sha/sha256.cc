@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <openssl/sha.h>
+#include <openssl/sha2.h>
 
 #include <openssl/mem.h>
 
 #include "../fipsmodule/bcm_interface.h"
 
+
+using namespace bssl;
 
 int SHA224_Init(SHA256_CTX *sha) {
   BCM_sha224_init(sha);

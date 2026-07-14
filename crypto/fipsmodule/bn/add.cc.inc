@@ -23,6 +23,8 @@
 #include "internal.h"
 
 
+using namespace bssl;
+
 int BN_add(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
   const BIGNUM *tmp;
   int a_neg = a->neg, ret;
@@ -59,8 +61,8 @@ int BN_add(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
   return ret;
 }
 
-int bn_uadd_consttime(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
-  // Widths are public, so we normalize to make |a| the larger one.
+int bssl::bn_uadd_consttime(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
+  // Widths are public, so we normalize to make `a` the larger one.
   if (a->width < b->width) {
     const BIGNUM *tmp = a;
     a = b;
@@ -179,9 +181,9 @@ int BN_sub(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
   return 1;
 }
 
-int bn_usub_consttime(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
-  // |b| may have more words than |a| given non-minimal inputs, but all words
-  // beyond |a->width| must then be zero.
+int bssl::bn_usub_consttime(BIGNUM *r, const BIGNUM *a, const BIGNUM *b) {
+  // `b` may have more words than `a` given non-minimal inputs, but all words
+  // beyond `a->width` must then be zero.
   int b_width = b->width;
   if (b_width > a->width) {
     if (!bn_fits_in_words(b, a->width)) {

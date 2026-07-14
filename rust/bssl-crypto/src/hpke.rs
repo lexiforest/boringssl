@@ -75,13 +75,22 @@
 use crate::{scoped, with_output_vec, with_output_vec_fallible, FfiSlice};
 use alloc::vec::Vec;
 
+use internal::HpkeKey;
+
 /// Supported KEM algorithms with values detailed in RFC 9180.
 #[derive(Clone, Copy)]
+#[repr(u16)]
 pub enum Kem {
     /// KEM using DHKEM P-256 and HKDF-SHA256.
     P256HkdfSha256 = 16, // 0x0010
     /// KEM using DHKEM X25519 and HKDF-SHA256.
     X25519HkdfSha256 = 32, // 0x0020
+    /// X-Wing hybrid KEM.
+    XWing = 25722, // 0x647a
+    /// ML-KEM-768.
+    MlKem768 = 65, // 0x0041
+    /// ML-KEM-1024.
+    MlKem1024 = 66, // 0x0042
 }
 
 impl Kem {
@@ -91,6 +100,9 @@ impl Kem {
             match self {
                 Kem::P256HkdfSha256 => bssl_sys::EVP_hpke_p256_hkdf_sha256(),
                 Kem::X25519HkdfSha256 => bssl_sys::EVP_hpke_x25519_hkdf_sha256(),
+                Kem::XWing => bssl_sys::EVP_hpke_xwing(),
+                Kem::MlKem768 => bssl_sys::EVP_hpke_mlkem768(),
+                Kem::MlKem1024 => bssl_sys::EVP_hpke_mlkem1024(),
             }
         }
     }
@@ -99,6 +111,9 @@ impl Kem {
         match n {
             n if n == Kem::P256HkdfSha256 as u16 => Some(Self::P256HkdfSha256),
             n if n == Kem::X25519HkdfSha256 as u16 => Some(Self::X25519HkdfSha256),
+            n if n == Kem::XWing as u16 => Some(Self::XWing),
+            n if n == Kem::MlKem768 as u16 => Some(Self::MlKem768),
+            n if n == Kem::MlKem1024 as u16 => Some(Self::MlKem1024),
             _ => None,
         }
     }
@@ -114,59 +129,115 @@ impl Kem {
         // handled by this crate.
         assert_eq!(ret, 1);
 
-        fn get_value_from_key(
-            key: &scoped::EvpHpkeKey,
-            accessor: unsafe extern "C" fn(
-                *const bssl_sys::EVP_HPKE_KEY,
-                // Output buffer.
-                *mut u8,
-                // Number of bytes written.
-                *mut usize,
-                // Maximum output size.
-                usize,
-            ) -> core::ffi::c_int,
-            max_len: usize,
-        ) -> Vec<u8> {
-            unsafe {
-                with_output_vec(max_len, |out| {
-                    let mut out_len = 0usize;
-                    let ret = accessor(key.as_ffi_ptr(), out, &mut out_len, max_len);
-                    // If `max_len` is correct then these functions never fail.
-                    assert_eq!(ret, 1);
-                    assert!(out_len <= max_len);
-                    // Safety: `out_len` bytes have been written, as required.
-                    out_len
-                })
-            }
-        }
-
-        let pub_key = get_value_from_key(
+        let pub_key = Self::get_value_from_key(
             &key,
             bssl_sys::EVP_HPKE_KEY_public_key,
             bssl_sys::EVP_HPKE_MAX_PUBLIC_KEY_LENGTH as usize,
         );
-        let priv_key = get_value_from_key(
+        let priv_key = Self::get_value_from_key(
             &key,
             bssl_sys::EVP_HPKE_KEY_private_key,
             bssl_sys::EVP_HPKE_MAX_PRIVATE_KEY_LENGTH as usize,
         );
         (pub_key, priv_key)
     }
+
+    /// Get a private key's corresponding public key, or `None` if the private
+    /// key is invalid.
+    pub fn public_from_private(&self, priv_key: &[u8]) -> Option<Vec<u8>> {
+        let HpkeKey { key } = self.parse_from_private_key(priv_key)?;
+
+        let pub_key = Self::get_value_from_key(
+            &key,
+            bssl_sys::EVP_HPKE_KEY_public_key,
+            bssl_sys::EVP_HPKE_MAX_PUBLIC_KEY_LENGTH as usize,
+        );
+        Some(pub_key)
+    }
+
+    /// Parse a private key in accordance to the given KEM scheme.
+    ///
+    /// The call returns `None` if `priv_key` is invalid.
+    pub fn parse_from_private_key(&self, priv_key: &[u8]) -> Option<HpkeKey> {
+        let mut key = scoped::EvpHpkeKey::new();
+        // Safety: `key`, `self`, and `priv_key` must be valid and this function
+        // doesn't take ownership of any of them.
+        let ret = unsafe {
+            bssl_sys::EVP_HPKE_KEY_init(
+                key.as_mut_ffi_ptr(),
+                self.as_ffi_ptr(),
+                priv_key.as_ffi_ptr(),
+                priv_key.len(),
+            )
+        };
+        (ret == 1).then_some(HpkeKey { key })
+    }
+
+    fn get_value_from_key(
+        key: &scoped::EvpHpkeKey,
+        accessor: unsafe extern "C" fn(
+            *const bssl_sys::EVP_HPKE_KEY,
+            // Output buffer.
+            *mut u8,
+            // Number of bytes written.
+            *mut usize,
+            // Maximum output size.
+            usize,
+        ) -> core::ffi::c_int,
+        max_len: usize,
+    ) -> Vec<u8> {
+        unsafe {
+            with_output_vec(max_len, |out| {
+                let mut out_len = 0usize;
+                let ret = accessor(key.as_ffi_ptr(), out, &mut out_len, max_len);
+                // If `max_len` is correct then these functions never fail.
+                assert_eq!(ret, 1);
+                assert!(out_len <= max_len);
+                // Safety: `out_len` bytes have been written, as required.
+                out_len
+            })
+        }
+    }
 }
 
-/// Supported KDF algorithms with values detailed in RFC 9180.
+#[doc(hidden)]
+pub mod internal {
+    use crate::scoped;
+
+    /// HPKE key suitable for interfacing with TLS stack.
+    pub struct HpkeKey {
+        pub(crate) key: scoped::EvpHpkeKey,
+    }
+
+    impl HpkeKey {
+        /// Safety: the handle to the underlying key **shall not** be used for mutating access.
+        pub unsafe fn as_ffi_ptr(&self) -> *const bssl_sys::EVP_HPKE_KEY {
+            self.key.as_ffi_ptr()
+        }
+    }
+}
+
+/// Supported KDF algorithms with values detailed in §7.2 of [RFC 9180].
+///
+/// [RFC 9180]: <https://datatracker.ietf.org/doc/html/rfc9180#section-7.2>
 #[derive(Clone, Copy)]
+#[repr(u16)]
 pub enum Kdf {
-    #[allow(missing_docs)]
+    /// HKDF-SHA256 as defined in [RFC 5869]
+    /// [RFC 5869]: <https://datatracker.ietf.org/doc/html/rfc5869>
     HkdfSha256 = 1,
 }
 
-/// Supported AEAD algorithms with values detailed in RFC 9180.
+/// Supported AEAD algorithms with values detailed in §7.3 of [RFC 9180].
+///
+/// [RFC 9180]: <https://datatracker.ietf.org/doc/html/rfc9180#section-7.3>
 #[derive(Clone, Copy)]
-#[allow(missing_docs)]
 pub enum Aead {
+    /// AES-GCM-128 defined by [NIST](https://doi.org/10.6028/nist.sp.800-38d)
     Aes128Gcm = 1,
+    /// AES-GCM-256 defined by [NIST](https://doi.org/10.6028/nist.sp.800-38d)
     Aes256Gcm = 2,
+    /// ChaCha20-Poly1305 defined by [RFC 8439](https://datatracker.ietf.org/doc/html/rfc8439)
     Chacha20Poly1305 = 3,
 }
 
@@ -208,14 +279,14 @@ pub struct Params {
 impl Params {
     /// New `Params` from KEM, KDF, and AEAD enums.
     pub fn new(kem: Kem, _kdf: Kdf, aead: Aead) -> Self {
-        // Safety: EVP_hpke_hkdf_sha256 just returns pointer to static data.
-        unsafe {
-            Self {
-                kem: kem.as_ffi_ptr(),
-                // Only one KDF is supported thus far.
-                kdf: bssl_sys::EVP_hpke_hkdf_sha256(),
-                aead: aead.as_ffi_ptr(),
-            }
+        Self {
+            kem: kem.as_ffi_ptr(),
+            // Only one KDF is supported thus far.
+            kdf: unsafe {
+                // Safety: EVP_hpke_hkdf_sha256 just returns pointer to static data.
+                bssl_sys::EVP_hpke_hkdf_sha256()
+            },
+            aead: aead.as_ffi_ptr(),
         }
     }
 
@@ -517,16 +588,22 @@ mod test {
             recipient_priv_key: decode_hex("f3ce7fdae57e1a310d87f1ebbde6f328be0a99cdbcadf4d6589cf29de4b8ffd2"),
             encapsulated_key: decode_hex_into_vec("04a92719c6195d5085104f469a8b9814d5838ff72b60501e2c4466e5e67b325ac98536d7b61a1af4b78e5b7f951c0900be863c403ce65c9bfcb9382657222d18c4"),
             plaintext: decode_hex("4265617574792069732074727574682c20747275746820626561757479"),
-            associated_data: decode_hex("436f756e742d30"), 
-            ciphertext: decode_hex("5ad590bb8baa577f8619db35a36311226a896e7342a6d836d8b7bcd2f20b6c7f9076ac232e3ab2523f39513434"), 
-            exporter_context: decode_hex("54657374436f6e74657874"), 
-            exported_value: decode_hex("d8f1ea7942adbba7412c6d431c62d01371ea476b823eb697e1f6e6cae1dab85a"), 
+            associated_data: decode_hex("436f756e742d30"),
+            ciphertext: decode_hex("5ad590bb8baa577f8619db35a36311226a896e7342a6d836d8b7bcd2f20b6c7f9076ac232e3ab2523f39513434"),
+            exporter_context: decode_hex("54657374436f6e74657874"),
+            exported_value: decode_hex("d8f1ea7942adbba7412c6d431c62d01371ea476b823eb697e1f6e6cae1dab85a"),
         }
     }
 
     #[test]
     fn all_algorithms() {
-        let kems = vec![Kem::X25519HkdfSha256, Kem::P256HkdfSha256];
+        let kems = vec![
+            Kem::X25519HkdfSha256,
+            Kem::P256HkdfSha256,
+            Kem::XWing,
+            Kem::MlKem768,
+            Kem::MlKem1024,
+        ];
         let kdfs = vec![Kdf::HkdfSha256];
         let aeads = vec![Aead::Aes128Gcm, Aead::Aes256Gcm, Aead::Chacha20Poly1305];
         let plaintext: &[u8] = b"plaintext";
@@ -559,6 +636,23 @@ mod test {
                     assert!(recv_ctx.open(b"nonsense", aad).is_none());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn kem_public_from_private() {
+        let kems = vec![
+            Kem::X25519HkdfSha256,
+            Kem::P256HkdfSha256,
+            Kem::XWing,
+            Kem::MlKem768,
+            Kem::MlKem1024,
+        ];
+        for kem in &kems {
+            let (pub_key, priv_key) = kem.generate_keypair();
+            assert_eq!(kem.public_from_private(&priv_key), Some(pub_key));
+
+            assert_eq!(kem.public_from_private(b"invalid"), None);
         }
     }
 

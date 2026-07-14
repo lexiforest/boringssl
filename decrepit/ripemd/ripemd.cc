@@ -26,6 +26,8 @@
 #define RIPEMD160_D 0x10325476L
 #define RIPEMD160_E 0xC3D2E1F0L
 
+using namespace bssl;
+
 int RIPEMD160_Init(RIPEMD160_CTX *ctx) {
   OPENSSL_memset(ctx, 0, sizeof(*ctx));
   ctx->h[0] = RIPEMD160_A;
@@ -44,18 +46,26 @@ void RIPEMD160_Transform(RIPEMD160_CTX *c,
   ripemd160_block_data_order(c->h, data, 1);
 }
 
+namespace {
+struct RIPEMD160Traits {
+  using HashContext = RIPEMD160_CTX;
+  static constexpr size_t kBlockSize = RIPEMD160_CBLOCK;
+  static constexpr bool kLengthIsBigEndian = false;
+  static void HashBlocks(uint32_t *state, const uint8_t *data,
+                         size_t num_blocks) {
+    ripemd160_block_data_order(state, data, num_blocks);
+  }
+};
+}  // namespace
+
 int RIPEMD160_Update(RIPEMD160_CTX *c, const void *data, size_t len) {
-  crypto_md32_update(&ripemd160_block_data_order, c->h, c->data,
-                     RIPEMD160_CBLOCK, &c->num, &c->Nh, &c->Nl,
-                     reinterpret_cast<const uint8_t *>(data), len);
+  crypto_md32_update<RIPEMD160Traits>(
+      c, Span(static_cast<const uint8_t *>(data), len));
   return 1;
 }
 
 int RIPEMD160_Final(uint8_t out[RIPEMD160_DIGEST_LENGTH], RIPEMD160_CTX *c) {
-  crypto_md32_final(&ripemd160_block_data_order, c->h, c->data,
-                    RIPEMD160_CBLOCK, &c->num, c->Nh, c->Nl,
-                    /*is_big_endian=*/0);
-
+  crypto_md32_final<RIPEMD160Traits>(c);
   CRYPTO_store_u32_le(out, c->h[0]);
   CRYPTO_store_u32_le(out + 4, c->h[1]);
   CRYPTO_store_u32_le(out + 8, c->h[2]);
@@ -693,7 +703,7 @@ uint8_t *RIPEMD160(const uint8_t *data, size_t len,
   RIPEMD160_CTX ctx;
 
   if (!RIPEMD160_Init(&ctx)) {
-    return NULL;
+    return nullptr;
   }
 
   RIPEMD160_Update(&ctx, data, len);

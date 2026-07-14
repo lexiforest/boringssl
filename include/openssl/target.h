@@ -51,8 +51,10 @@
 #elif defined(__pnacl__)
 #define OPENSSL_32_BIT
 #define OPENSSL_PNACL
-#elif defined(__wasm__)
+#elif defined(__wasm32__)
 #define OPENSSL_32_BIT
+#elif defined(__wasm64__)
+#define OPENSSL_64_BIT
 #elif defined(__asmjs__)
 #define OPENSSL_32_BIT
 #elif defined(__myriad2__)
@@ -104,6 +106,11 @@
 
 #if defined(__Fuchsia__)
 #define OPENSSL_FUCHSIA
+#endif
+
+// See go/boringssl-on-pythia.
+#if defined(__pythia__)
+#define OPENSSL_PYTHIA
 #endif
 
 // Trusty is Android's TEE target. See
@@ -166,6 +173,11 @@
 #define OPENSSL_NO_SOCK
 #endif
 
+#if defined(OPENSSL_PYTHIA)
+#define OPENSSL_NO_POSIX_IO
+#define OPENSSL_NO_SOCK
+#endif
+
 #if defined(__ANDROID_API__)
 #define OPENSSL_ANDROID
 #endif
@@ -193,11 +205,6 @@
 // which break such unsupported configurations will not be reverted.
 #if !defined(OPENSSL_NO_THREADS_CORRUPT_MEMORY_AND_LEAK_SECRETS_IF_THREADED)
 #define OPENSSL_THREADS
-#endif
-
-#if defined(BORINGSSL_UNSAFE_FUZZER_MODE) && \
-    !defined(BORINGSSL_UNSAFE_DETERMINISTIC_MODE)
-#define BORINGSSL_UNSAFE_DETERMINISTIC_MODE
 #endif
 
 #if defined(__has_feature)

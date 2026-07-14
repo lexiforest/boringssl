@@ -48,7 +48,7 @@ namespace {
 std::optional<std::shared_ptr<const ParsedCertificate>>
 InternalParseCertificate(Span<const uint8_t> cert, std::string *out_diagnostic) {
   ParseCertificateOptions default_options{};
-  // We follow Chromium in setting |allow_invalid_serial_numbers| in order to
+  // We follow Chromium in setting `allow_invalid_serial_numbers` in order to
   // not choke on 21-byte serial numbers, which are common.
   //
   // The reason for the discrepancy is that unsigned numbers with the high bit
@@ -207,7 +207,7 @@ std::optional<std::vector<std::vector<std::string>>> CertificateVerifyInternal(
   if (opts.time.has_value()) {
     now = opts.time.value();
   } else {
-    now = time(NULL);
+    now = time(nullptr);
   }
 
   der::GeneralizedTime verification_time;
@@ -260,6 +260,15 @@ std::optional<std::vector<std::vector<std::string>>> CertificateVerifyInternal(
       break;
     case CertificateVerifyOptions::KeyPurpose::CLIENT_AUTH_STRICT_LEAF:
       key_purpose = KeyPurpose::CLIENT_AUTH_STRICT_LEAF;
+      break;
+    case CertificateVerifyOptions::KeyPurpose::RCS_MLS_CLIENT_AUTH:
+      key_purpose = KeyPurpose::RCS_MLS_CLIENT_AUTH;
+      break;
+    case CertificateVerifyOptions::KeyPurpose::C2PA_TIMESTAMPING:
+      key_purpose = KeyPurpose::C2PA_TIMESTAMPING;
+      break;
+    case CertificateVerifyOptions::KeyPurpose::C2PA_MANIFEST:
+      key_purpose = KeyPurpose::C2PA_MANIFEST;
       break;
   }
   CertPathBuilder path_builder(leaf_cert, trust_store, &path_builder_delegate,

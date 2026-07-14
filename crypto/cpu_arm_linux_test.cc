@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 
 
+BSSL_NAMESPACE_BEGIN
 namespace {
 
 TEST(ARMLinuxTest, CPUInfo) {
@@ -95,7 +96,8 @@ TEST(ARMLinuxTest, CPUInfo) {
           // (Extra processors omitted.)
           "\n"
           "Hardware        : Qualcomm Technologies, Inc MSM8998\n",
-          HWCAP2_AES | HWCAP2_PMULL | HWCAP2_SHA1 | HWCAP2_SHA2,
+          CRYPTO_HWCAP2_AES | CRYPTO_HWCAP2_PMULL | CRYPTO_HWCAP2_SHA1 |
+              CRYPTO_HWCAP2_SHA2,
       },
       // Garbage should be tolerated.
       {
@@ -107,23 +109,24 @@ TEST(ARMLinuxTest, CPUInfo) {
       {
           "Features        : aes pmull sha1 sha2\n"
           "CPU architecture: 8\n",
-          HWCAP2_AES | HWCAP2_PMULL | HWCAP2_SHA1 | HWCAP2_SHA2,
+          CRYPTO_HWCAP2_AES | CRYPTO_HWCAP2_PMULL | CRYPTO_HWCAP2_SHA1 |
+              CRYPTO_HWCAP2_SHA2,
       },
       // Various combinations of ARMv8 flags.
       {
           "Features        : aes sha1 sha2\n"
           "CPU architecture: 8\n",
-          HWCAP2_AES | HWCAP2_SHA1 | HWCAP2_SHA2,
+          CRYPTO_HWCAP2_AES | CRYPTO_HWCAP2_SHA1 | CRYPTO_HWCAP2_SHA2,
       },
       {
           "Features        : pmull sha2\n"
           "CPU architecture: 8\n",
-          HWCAP2_PMULL | HWCAP2_SHA2,
+          CRYPTO_HWCAP2_PMULL | CRYPTO_HWCAP2_SHA2,
       },
       {
           "Features        : aes aes   aes not_aes aes aes \n"
           "CPU architecture: 8\n",
-          HWCAP2_AES,
+          CRYPTO_HWCAP2_AES,
       },
       {
           "Features        : \n"
@@ -144,9 +147,9 @@ TEST(ARMLinuxTest, CPUInfo) {
 
   for (const auto &t : kTests) {
     SCOPED_TRACE(t.cpuinfo);
-    STRING_PIECE sp = {t.cpuinfo, strlen(t.cpuinfo)};
-    EXPECT_EQ(t.hwcap2, crypto_get_arm_hwcap2_from_cpuinfo(&sp));
+    EXPECT_EQ(t.hwcap2, armcap::GetHWCAP2FromCpuinfo(t.cpuinfo));
   }
 }
 
 }  // namespace
+BSSL_NAMESPACE_END
