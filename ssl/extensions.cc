@@ -4424,17 +4424,29 @@ static const struct tls_extension *tls_extension_find(uint32_t *out_index,
   return nullptr;
 }
 
+static bool ssl_invalid_extension_order() {
+  OPENSSL_PUT_ERROR(SSL, SSL_R_INVALID_COMMAND);
+  return false;
+}
+
 // curl-impersonate: set customized extension order
 //
-// Generate the extension_permutation array from a customized extension order string.
-//
-// The customized extension order string is a dash-separated list of extensions.
-//
-bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
-  if (hs->config->extension_order == nullptr) {
+// Parse a dash-separated list of extension code points into an extension_permutation array.
+bool ssl_parse_extension_order(Array<uint8_t> *out, const char *order_string) {
+  if (order_string == nullptr) {
+    out->Reset();
     return true;
   }
-  // fprintf(stderr, "order %s\n", hs->config->extension_order);
+
+  size_t num_entries = order_string[0] == '\0' ? 0 : 1;
+  for (const char *p = order_string; *p != '\0'; p++) {
+    if (*p == '-' && ++num_entries > kNumExtensions) {
+      return ssl_invalid_extension_order();
+    }
+  }
+
+  static_assert(kNumExtensions <= UINT8_MAX,
+                "extension order type is too small");
   Array<uint8_t> order;
   if (!order.Init(kNumExtensions)) {
     return false;
@@ -4443,22 +4455,57 @@ bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
   for (size_t i = 0; i < kNumExtensions; i++) {
     order[i] = 255;
   }
-  // split the order string, and put there order in the table
-  const char *delimiter = "-";
-  char *tmp = strdup(hs->config->extension_order);
-  char *ext = strtok(tmp, delimiter);
-  size_t idx = 0;
-  while (ext != nullptr) {
-    unsigned ext_index = 0;
-    tls_extension_find(&ext_index, atoi(ext));
-    order[idx] = ext_index;
-    ext = strtok(NULL, delimiter);
-    idx++;
-  }
-  free(tmp);
 
-  hs->extension_permutation = std::move(order);
+  bool seen[kNumExtensions] = {};
+  const char *p = order_string;
+  size_t idx = 0;
+  while (*p != '\0') {
+    if (idx >= order.size() ||
+        !OPENSSL_isdigit(static_cast<unsigned char>(*p))) {
+      return ssl_invalid_extension_order();
+    }
+
+    uint32_t value = 0;
+    do {
+      const uint32_t digit = static_cast<uint32_t>(*p - '0');
+      if (value > (UINT16_MAX - digit) / 10) {
+        return ssl_invalid_extension_order();
+      }
+      value = value * 10 + digit;
+      p++;
+    } while (OPENSSL_isdigit(static_cast<unsigned char>(*p)));
+
+    if (*p != '\0' && *p != '-') {
+      return ssl_invalid_extension_order();
+    }
+
+    uint32_t ext_index;
+    if (tls_extension_find(&ext_index, static_cast<uint16_t>(value)) ==
+            nullptr ||
+        seen[ext_index]) {
+      return ssl_invalid_extension_order();
+    }
+    seen[ext_index] = true;
+    order[idx] = static_cast<uint8_t>(ext_index);
+    idx++;
+
+    if (*p == '-') {
+      p++;
+      if (*p == '\0') {
+        return ssl_invalid_extension_order();
+      }
+    }
+  }
+
+  *out = std::move(order);
   return true;
+}
+
+bool ssl_set_extension_order(SSL_HANDSHAKE *hs) {
+  if (hs->config->extension_order.empty()) {
+    return true;
+  }
+  return hs->extension_permutation.CopyFrom(hs->config->extension_order);
 }
 
 static bool add_padding_extension(CBB *cbb, uint16_t ext, size_t len) {

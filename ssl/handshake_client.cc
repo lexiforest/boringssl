@@ -146,7 +146,7 @@ static bool ssl_write_client_cipher_list(const SSL_HANDSHAKE *hs, CBB *out,
 
 #define TLS13_CIPHER_LEN 74
 
-    const char *order = hs->config->cipher_order;
+    const char *order = hs->config->cipher_order.get();
     // printf("CIPHER ORDER IS %s\n", order);
 
     // This may seem silly at the first sight, but it's actually faster and easier.

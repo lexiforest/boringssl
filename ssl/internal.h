@@ -2230,6 +2230,10 @@ UniquePtr<SSL_SESSION> tls13_create_session_with_ticket(SSLImpl *ssl,
 // for `hs`, if applicable. It returns true on success and false on error.
 bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs);
 
+// curl-impersonate: ssl_parse_extension_order parses the explicit ClientHello
+// extension order into `out`. It returns true on success and false on error.
+bool ssl_parse_extension_order(Array<uint8_t> *out, const char *order);
+
 // ssl_set_extension_order applies the fork-specific explicit ClientHello
 // extension order, when configured.
 bool ssl_set_extension_order(SSL_HANDSHAKE *hs);
@@ -3383,10 +3387,10 @@ struct SSL_CONFIG {
   UniquePtr<SSLCipherPreferenceList> cipher_list;
 
   // curl-impersonate
-  char *extension_order = nullptr;
+  Array<uint8_t> extension_order;
 
   // curl-impersonate
-  const char *cipher_order = nullptr;
+  UniquePtr<char> cipher_order;
 
   // curl-impersonate
   int key_usage_check_enabled = 1;
@@ -3944,10 +3948,10 @@ class SSLContext : public ssl_ctx_st, public RefCounted<SSLContext> {
   UniquePtr<SSLCipherPreferenceList> cipher_list;
 
   // curl-impersonate
-  char *extension_order = nullptr;
+  Array<uint8_t> extension_order;
 
   // curl-impersonate
-  const char *cipher_order = nullptr;
+  UniquePtr<char> cipher_order;
 
   // curl-impersonate
   int key_usage_check_enabled = 1;

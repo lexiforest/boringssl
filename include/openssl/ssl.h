@@ -1733,10 +1733,14 @@ OPENSSL_EXPORT int SSL_CTX_set_strict_cipher_list(SSL_CTX *ctx,
 // SSL_CTX_set_cipher_list configures the cipher list for `ctx`, evaluating
 // `str` as a cipher string. It returns one on success and zero on failure.
 
-// curl-impersonate: set the extension order by given string
+// curl-impersonate: SSL_CTX_set_extension_order configures the ClientHello
+// extension order as a dash-separated list of extension code points. It copies
+// `order` and returns one on success and zero if `order` is invalid or
+// allocation fails.
 OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
 
-// curl-impersonate
+// curl-impersonate: SSL_CTX_set_key_usage_check_enabled configures whether
+// certificate key usage is checked. It returns one.
 OPENSSL_EXPORT int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled);
 
 //
@@ -5545,10 +5549,10 @@ OPENSSL_EXPORT void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled);
 // permute extensions. For now, this is only implemented for the ClientHello.
 OPENSSL_EXPORT void SSL_set_permute_extensions(SSL *ssl, int enabled);
 
-// curl-impersonate
+// curl-impersonate: See SSL_CTX_set_extension_order above.
 OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
 
-// curl-impersonate
+// curl-impersonate: See SSL_CTX_set_key_usage_check_enabled above.
 OPENSSL_EXPORT int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled);
 
 // SSL_max_seal_overhead returns the maximum overhead, in bytes, of sealing a

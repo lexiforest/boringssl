@@ -530,11 +530,17 @@ SSL *SSL_new(SSL_CTX *ctx) {
   ssl->config->aes_hw_override = ctx_impl->aes_hw_override;
   ssl->config->aes_hw_override_value = ctx_impl->aes_hw_override_value;
   ssl->config->compliance_policy = ctx_impl->compliance_policy;
-  ssl->config->extension_order = ctx_impl->extension_order;
-  ssl->config->cipher_order = ctx_impl->cipher_order;
   ssl->config->key_usage_check_enabled = ctx_impl->key_usage_check_enabled;
   ssl->config->record_size_limit = ctx_impl->record_size_limit;
   ssl->config->key_shares_limit = ctx_impl->key_shares_limit;
+
+  if (ctx_impl->cipher_order != nullptr) {
+    ssl->config->cipher_order.reset(
+        OPENSSL_strdup(ctx_impl->cipher_order.get()));
+    if (ssl->config->cipher_order == nullptr) {
+      return nullptr;
+    }
+  }
 
   if (!ssl->config->supported_group_list.CopyFrom(
           ctx_impl->supported_group_list) ||
@@ -543,6 +549,7 @@ SSL *SSL_new(SSL_CTX *ctx) {
       !ssl->config->alpn_client_proto_list.CopyFrom(
           ctx_impl->alpn_client_proto_list) ||
       !ssl->config->verify_sigalgs.CopyFrom(ctx_impl->verify_sigalgs) ||
+      !ssl->config->extension_order.CopyFrom(ctx_impl->extension_order) ||
       !ssl->config->delegated_credentials.CopyFrom(
           ctx_impl->delegated_credentials) ||
       !ssl->config->accepted_peer_cert_types.TryCopyFrom(
@@ -2213,23 +2220,31 @@ const char *SSL_get_cipher_list(const SSL *ssl, int n) {
   return c->name;
 }
 
-int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str) {
+static int ssl_ctx_set_cipher_list(SSL_CTX *ctx, const char *str,
+                                   bool strict) {
+  if (str == nullptr) {
+    return 0;
+  }
   auto *ctx_impl = FromOpaque(ctx);
   const bool has_aes_hw = ctx_impl->aes_hw_override
                               ? ctx_impl->aes_hw_override_value
                               : EVP_has_aes_hardware();
-  ctx_impl->cipher_order = str;
-  return ssl_create_cipher_list(&ctx_impl->cipher_list, has_aes_hw, str,
-                                false /* not strict */);
+  UniquePtr<char> cipher_order(OPENSSL_strdup(str));
+  if (cipher_order == nullptr ||
+      !ssl_create_cipher_list(&ctx_impl->cipher_list, has_aes_hw, str,
+                              strict)) {
+    return 0;
+  }
+  ctx_impl->cipher_order = std::move(cipher_order);
+  return 1;
+}
+
+int SSL_CTX_set_cipher_list(SSL_CTX *ctx, const char *str) {
+  return ssl_ctx_set_cipher_list(ctx, str, false /* not strict */);
 }
 
 int SSL_CTX_set_strict_cipher_list(SSL_CTX *ctx, const char *str) {
-  auto *ctx_impl = FromOpaque(ctx);
-  const bool has_aes_hw = ctx_impl->aes_hw_override
-                              ? ctx_impl->aes_hw_override_value
-                              : EVP_has_aes_hardware();
-  return ssl_create_cipher_list(&ctx_impl->cipher_list, has_aes_hw, str,
-                                true /* strict */);
+  return ssl_ctx_set_cipher_list(ctx, str, true /* strict */);
 }
 
 int SSL_set_cipher_list(SSL *ssl, const char *str) {
@@ -3315,13 +3330,17 @@ void SSL_CTX_set_permute_extensions(SSL_CTX *ctx, int enabled) {
 
 // curl-impersonate: set extensions order
 int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order) {
-  FromOpaque(ctx)->extension_order = order;
-  return 0;
+  Array<uint8_t> parsed_order;
+  if (!ssl_parse_extension_order(&parsed_order, order)) {
+    return 0;
+  }
+  FromOpaque(ctx)->extension_order = std::move(parsed_order);
+  return 1;
 }
 
 int SSL_CTX_set_key_usage_check_enabled(SSL_CTX *ctx, int enabled) {
   FromOpaque(ctx)->key_usage_check_enabled = enabled;
-  return 0;
+  return 1;
 }
 
 void SSL_set_permute_extensions(SSL *ssl, int enabled) {
