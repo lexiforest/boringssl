@@ -51,7 +51,8 @@ TEST(SipHash, Vectors) {
     uint64_t key_words[2];
     memcpy(key_words, key.data(), key.size());
     uint64_t result = SIPHASH_24(key_words, msg.data(), msg.size());
-    EXPECT_EQ(Bytes(reinterpret_cast<uint8_t *>(&result), sizeof(result)),
-              Bytes(hash));
+    uint8_t result_bytes[8];
+    bssl::CRYPTO_store_u64_le(result_bytes, result);
+    EXPECT_EQ(Bytes(result_bytes), Bytes(hash));
   });
 }

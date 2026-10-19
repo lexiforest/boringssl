@@ -161,10 +161,17 @@ void big_endian_to_words(Span<BN_ULONG> out, Span<const uint8_t> in) {
   BSSL_CHECK(in.size() <= out.size() * sizeof(BN_ULONG));
   // Ensure any excess bytes are zeroed.
   OPENSSL_memset(out.data(), 0, out.size() * sizeof(BN_ULONG));
+#if defined(OPENSSL_BIG_ENDIAN)
+  for (size_t i = 0; i < in.size(); i++) {
+    size_t j = in.size() - 1 - i;
+    out[j / sizeof(BN_ULONG)] |= BN_ULONG{in[i]} << (8 * (j % sizeof(BN_ULONG)));
+  }
+#else
   uint8_t *out_u8 = reinterpret_cast<uint8_t *>(out.data());
   for (size_t i = 0; i < in.size(); i++) {
     out_u8[in.size() - 1 - i] = in[i];
   }
+#endif
 }
 
 void big_endian_reduce_to_felem(const EC_GROUP *group, EC_FELEM *out,
