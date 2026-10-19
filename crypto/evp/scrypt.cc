@@ -202,7 +202,21 @@ int EVP_PBE_scrypt(const char *password, size_t password_len,
   }
 
   for (uint64_t i = 0; i < p; i++) {
+#if defined(OPENSSL_BIG_ENDIAN)
+    for (uint64_t j = 0; j < 2 * r; j++) {
+      for (int k = 0; k < 16; k++) {
+        B[j + i * 2 * r].words[k] = CRYPTO_load_u32_le(&B[j + i * 2 * r].words[k]);
+      }
+    }
+#endif
     scryptROMix(B + 2 * r * i, r, N, T, V);
+#if defined(OPENSSL_BIG_ENDIAN)
+    for (uint64_t j = 0; j < 2 * r; j++) {
+      for (int k = 0; k < 16; k++) {
+        B[j + i * 2 * r].words[k] = CRYPTO_load_u32_le(&B[j + i * 2 * r].words[k]);
+      }
+    }
+#endif
   }
 
   if (!PKCS5_PBKDF2_HMAC(password, password_len, (const uint8_t *)B, B_bytes, 1,

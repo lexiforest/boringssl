@@ -344,6 +344,8 @@ static void aes_nohw_compact_block(aes_word_t out[AES_NOHW_BLOCK_WORDS],
 #if defined(OPENSSL_SSE2)
   // No conversions needed.
 #elif defined(OPENSSL_64_BIT)
+  out[0] = CRYPTO_load_u64_le(in);
+  out[1] = CRYPTO_load_u64_le(in + 8);
   uint64_t a0 = aes_nohw_compact_word(out[0]);
   uint64_t a1 = aes_nohw_compact_word(out[1]);
   out[0] = (a0 & UINT64_C(0x00000000ffffffff)) | (a1 << 32);
@@ -376,8 +378,8 @@ static void aes_nohw_uncompact_block(
       aes_nohw_uncompact_word((a0 & UINT64_C(0x00000000ffffffff)) | (a1 << 32));
   uint64_t b1 =
       aes_nohw_uncompact_word((a1 & UINT64_C(0xffffffff00000000)) | (a0 >> 32));
-  memcpy(out, &b0, 8);
-  memcpy(out + 8, &b1, 8);
+  CRYPTO_store_u64_le(out, b0);
+  CRYPTO_store_u64_le(out + 8, b1);
 #else
   uint32_t a0 = in[0];
   uint32_t a1 = in[1];
