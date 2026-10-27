@@ -2227,7 +2227,8 @@ UniquePtr<SSL_SESSION> tls13_create_session_with_ticket(SSLImpl *ssl,
                                                         CBS *body);
 
 // ssl_setup_extension_permutation computes a ClientHello extension permutation
-// for `hs`, if applicable. It returns true on success and false on error.
+// for `hs`, if applicable, shuffling any explicit order previously applied by
+// `ssl_set_extension_order`. It returns true on success and false on error.
 bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs);
 
 // curl-impersonate: ssl_parse_extension_order parses the explicit ClientHello

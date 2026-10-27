@@ -1736,7 +1736,8 @@ OPENSSL_EXPORT int SSL_CTX_set_strict_cipher_list(SSL_CTX *ctx,
 // curl-impersonate: SSL_CTX_set_extension_order configures the ClientHello
 // extension order as a dash-separated list of extension code points. It copies
 // `order` and returns one on success and zero if `order` is invalid or
-// allocation fails.
+// allocation fails. If extension permutation is enabled, the configured list
+// is shuffled while extensions omitted from the list remain omitted.
 OPENSSL_EXPORT int SSL_CTX_set_extension_order(SSL_CTX *ctx, char *order);
 
 // curl-impersonate: SSL_CTX_set_key_usage_check_enabled configures whether

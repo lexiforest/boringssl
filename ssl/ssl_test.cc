@@ -10027,6 +10027,57 @@ static bool GetExtensionOrder(SSL_CTX *client_ctx, std::vector<uint16_t> *out,
   return app_data.callback_done;
 }
 
+TEST(SSLTest, ExplicitOrderEnablesLegacyTLS13Extensions) {
+  bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(TLS_method()));
+  ASSERT_TRUE(ctx);
+  ASSERT_TRUE(SSL_CTX_set_min_proto_version(ctx.get(), TLS1_3_VERSION));
+  ASSERT_TRUE(SSL_CTX_set_max_proto_version(ctx.get(), TLS1_3_VERSION));
+
+  char extension_order[] = "23-65281-43";
+  ASSERT_TRUE(SSL_CTX_set_extension_order(ctx.get(), extension_order));
+  std::vector<uint16_t> order;
+  ASSERT_TRUE(GetExtensionOrder(ctx.get(), &order, nullptr, false));
+  EXPECT_THAT(order, ElementsAre(TLSEXT_TYPE_extended_master_secret,
+                                 TLSEXT_TYPE_renegotiate,
+                                 TLSEXT_TYPE_supported_versions));
+}
+
+TEST(SSLTest, PermuteExplicitExtensionOrder) {
+  bssl::UniquePtr<SSL_CTX> ctx(SSL_CTX_new(TLS_method()));
+  ASSERT_TRUE(ctx);
+  ASSERT_TRUE(SSL_CTX_set_min_proto_version(ctx.get(), TLS1_3_VERSION));
+  SSL_CTX_enable_signed_cert_timestamps(ctx.get());
+
+  // SCT requests are enabled above, but the explicit list must still omit them.
+  char extension_order[] = "43-51-10-45-13";
+  ASSERT_TRUE(SSL_CTX_set_extension_order(ctx.get(), extension_order));
+  std::vector<uint16_t> order;
+  ASSERT_TRUE(GetExtensionOrder(ctx.get(), &order, nullptr, false));
+  EXPECT_THAT(order, ElementsAre(TLSEXT_TYPE_supported_versions,
+                                 TLSEXT_TYPE_key_share,
+                                 TLSEXT_TYPE_supported_groups,
+                                 TLSEXT_TYPE_psk_key_exchange_modes,
+                                 TLSEXT_TYPE_signature_algorithms));
+  const auto fixed_order = order;
+  auto sorted_order = order;
+  std::sort(sorted_order.begin(), sorted_order.end());
+
+  SSL_CTX_set_permute_extensions(ctx.get(), 1);
+  bool changed = false;
+  // Five extensions give a false negative probability of (1/120)^14 < 2^-96.
+  for (int i = 0; i < 14; i++) {
+    ASSERT_TRUE(GetExtensionOrder(ctx.get(), &order, nullptr, false));
+    changed |= order != fixed_order;
+    std::sort(order.begin(), order.end());
+    EXPECT_EQ(order, sorted_order);
+  }
+  EXPECT_TRUE(changed) << "Explicit extension order was not permuted";
+
+  SSL_CTX_set_permute_extensions(ctx.get(), 0);
+  ASSERT_TRUE(GetExtensionOrder(ctx.get(), &order, nullptr, false));
+  EXPECT_EQ(order, fixed_order);
+}
+
 // Test that, when extension permutation is enabled, the ClientHello extension
 // order changes, both with and without ECH, and in both ClientHelloInner and
 // ClientHelloOuter.

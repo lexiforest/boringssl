@@ -701,8 +701,10 @@ static bool ext_ri_add_clienthello(const SSL_HANDSHAKE *hs, CBB *out,
                                    CBB *out_compressible,
                                    ssl_client_hello_type_t type) {
   const SSLImpl *const ssl = hs->ssl;
-  // Renegotiation indication is not necessary in TLS 1.3.
-  if (hs->min_version >= TLS1_3_VERSION ||  //
+  // Renegotiation indication is not necessary in TLS 1.3, but an explicit
+  // extension order may request it for ClientHello impersonation.
+  if ((hs->min_version >= TLS1_3_VERSION &&
+       hs->config->extension_order.empty()) ||  //
       type == ssl_client_hello_inner) {
     return true;
   }
@@ -865,8 +867,11 @@ static bool ext_ri_add_serverhello(SSL_HANDSHAKE *hs, CBB *out) {
 static bool ext_ems_add_clienthello(const SSL_HANDSHAKE *hs, CBB *out,
                                     CBB *out_compressible,
                                     ssl_client_hello_type_t type) {
-  // Extended master secret is not necessary in TLS 1.3.
-  if (hs->min_version >= TLS1_3_VERSION || type == ssl_client_hello_inner) {
+  // Extended master secret is not necessary in TLS 1.3, but an explicit
+  // extension order may request it for ClientHello impersonation.
+  if ((hs->min_version >= TLS1_3_VERSION &&
+       hs->config->extension_order.empty()) ||
+      type == ssl_client_hello_inner) {
     return true;
   }
 
@@ -4395,13 +4400,23 @@ bool ssl_setup_extension_permutation(SSL_HANDSHAKE *hs) {
                 "extensions_permutation type is too small");
   uint32_t seeds[kNumExtensions - 1];
   Array<uint8_t> permutation;
-  if (!RAND_bytes(reinterpret_cast<uint8_t *>(seeds), sizeof(seeds)) ||
-      !permutation.InitForOverwrite(kNumExtensions)) {
+  if (!RAND_bytes(reinterpret_cast<uint8_t *>(seeds), sizeof(seeds))) {
     return false;
   }
-  // By default, nothing is permuted.
-  for (size_t i = 0; i < kNumExtensions; i++) {
-    permutation[i] = i;
+  if (hs->extension_permutation.empty()) {
+    if (!permutation.InitForOverwrite(kNumExtensions)) {
+      return false;
+    }
+    // By default, nothing is permuted.
+    for (size_t i = 0; i < kNumExtensions; i++) {
+      permutation[i] = i;
+    }
+  } else {
+    // curl-impersonate: shuffle the explicit order, preserving placeholders for
+    // omitted extensions so permutation does not enable additional extensions.
+    if (!permutation.CopyFrom(hs->extension_permutation)) {
+      return false;
+    }
   }
   for (size_t i = kNumExtensions - 1; i > 0; i--) {
     // Set element `i` to a randomly-selected element 0 <= j <= i.
