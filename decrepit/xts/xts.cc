@@ -30,6 +30,22 @@ typedef struct xts128_context {
   block128_f block1, block2;
 } XTS128_CONTEXT;
 
+#if defined(OPENSSL_BIG_ENDIAN)
+#define BSWAP4_IF_BIG_ENDIAN(x) (CRYPTO_bswap4(x))
+#else
+#define BSWAP4_IF_BIG_ENDIAN(x) (x)
+#endif
+
+static void bswap8_inplace_if_big_endian(uint64_t *block, size_t len) {
+#if defined(OPENSSL_BIG_ENDIAN)
+  for (size_t i = 0; i < len; i++) {
+    block[i] = CRYPTO_bswap8(block[i]);
+  }
+#else
+  (void)block;
+#endif
+}
+
 static size_t CRYPTO_xts128_encrypt(const XTS128_CONTEXT *ctx,
                                     const uint8_t iv[16], const uint8_t *inp,
                                     uint8_t *out, size_t len, int enc) {
@@ -70,10 +86,12 @@ static size_t CRYPTO_xts128_encrypt(const XTS128_CONTEXT *ctx,
 
     unsigned int carry, res;
 
-    res = 0x87 & (((int)tweak.d[3]) >> 31);
+    res = 0x87 & (((int)BSWAP4_IF_BIG_ENDIAN(tweak.d[3])) >> 31);
+    bswap8_inplace_if_big_endian(tweak.u, sizeof(tweak.u) / sizeof(uint64_t));
     carry = (unsigned int)(tweak.u[0] >> 63);
     tweak.u[0] = (tweak.u[0] << 1) ^ res;
     tweak.u[1] = (tweak.u[1] << 1) | carry;
+    bswap8_inplace_if_big_endian(tweak.u, sizeof(tweak.u) / sizeof(uint64_t));
   }
   if (enc) {
     for (i = 0; i < len; ++i) {
@@ -95,10 +113,13 @@ static size_t CRYPTO_xts128_encrypt(const XTS128_CONTEXT *ctx,
 
     unsigned int carry, res;
 
-    res = 0x87 & (((int)tweak.d[3]) >> 31);
+    res = 0x87 & (((int)BSWAP4_IF_BIG_ENDIAN(tweak.d[3])) >> 31);
+    bswap8_inplace_if_big_endian(tweak.u, sizeof(tweak.u) / sizeof(uint64_t));
     carry = (unsigned int)(tweak.u[0] >> 63);
     tweak1.u[0] = (tweak.u[0] << 1) ^ res;
     tweak1.u[1] = (tweak.u[1] << 1) | carry;
+    bswap8_inplace_if_big_endian(tweak.u, sizeof(tweak.u) / sizeof(uint64_t));
+    bswap8_inplace_if_big_endian(tweak1.u, sizeof(tweak1.u) / sizeof(uint64_t));
     OPENSSL_memcpy(scratch.c, inp, 16);
     scratch.u[0] ^= tweak1.u[0];
     scratch.u[1] ^= tweak1.u[1];

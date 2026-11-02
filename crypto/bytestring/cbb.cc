@@ -557,7 +557,7 @@ int CBB_add_asn1_int64_with_tag(CBB *cbb, int64_t value, CBS_ASN1_TAG tag) {
   }
 
   uint8_t bytes[sizeof(int64_t)];
-  memcpy(bytes, &value, sizeof(value));
+  CRYPTO_store_u64_le(bytes, static_cast<uint64_t>(value));
   int start = 7;
   // Skip leading sign-extension bytes unless they are necessary.
   while (start > 0 && (bytes[start] == 0xff && (bytes[start - 1] & 0x80))) {

@@ -43,9 +43,24 @@ static const uint8_t sigma[16] = { 'e', 'x', 'p', 'a', 'n', 'd', ' ', '3',
 void bssl::CRYPTO_hchacha20(uint8_t out[32], const uint8_t key[32],
                             const uint8_t nonce[16]) {
   uint32_t x[16];
-  OPENSSL_memcpy(x, sigma, sizeof(sigma));
-  OPENSSL_memcpy(&x[4], key, 32);
-  OPENSSL_memcpy(&x[12], nonce, 16);
+  x[0] = CRYPTO_load_u32_le(sigma + 0);
+  x[1] = CRYPTO_load_u32_le(sigma + 4);
+  x[2] = CRYPTO_load_u32_le(sigma + 8);
+  x[3] = CRYPTO_load_u32_le(sigma + 12);
+
+  x[4] = CRYPTO_load_u32_le(key + 0);
+  x[5] = CRYPTO_load_u32_le(key + 4);
+  x[6] = CRYPTO_load_u32_le(key + 8);
+  x[7] = CRYPTO_load_u32_le(key + 12);
+  x[8] = CRYPTO_load_u32_le(key + 16);
+  x[9] = CRYPTO_load_u32_le(key + 20);
+  x[10] = CRYPTO_load_u32_le(key + 24);
+  x[11] = CRYPTO_load_u32_le(key + 28);
+
+  x[12] = CRYPTO_load_u32_le(nonce + 0);
+  x[13] = CRYPTO_load_u32_le(nonce + 4);
+  x[14] = CRYPTO_load_u32_le(nonce + 8);
+  x[15] = CRYPTO_load_u32_le(nonce + 12);
 
   for (size_t i = 0; i < 20; i += 2) {
     QUARTERROUND(0, 4, 8, 12)
@@ -58,8 +73,13 @@ void bssl::CRYPTO_hchacha20(uint8_t out[32], const uint8_t key[32],
     QUARTERROUND(3, 4, 9, 14)
   }
 
-  OPENSSL_memcpy(out, &x[0], sizeof(uint32_t) * 4);
-  OPENSSL_memcpy(&out[16], &x[12], sizeof(uint32_t) * 4);
+  int i;
+  for (i = 0; i < 4; ++i) {
+    CRYPTO_store_u32_le(out + 4 * i, x[i]);
+  }
+  for (i = 0; i < 4; ++i) {
+    CRYPTO_store_u32_le(out + 16 + (4 * i), x[i + 12]);
+  }
 }
 
 #if defined(CHACHA20_ASM_NOHW)

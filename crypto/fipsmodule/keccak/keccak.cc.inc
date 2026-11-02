@@ -286,22 +286,41 @@ void bssl::BORINGSSL_keccak_init(struct BORINGSSL_keccak_st *ctx,
   keccak_init(ctx, config);
 }
 
+// XORs `v` into byte `i` of `state` in little-endian order.
+static void keccak_xor_byte(uint64_t *state, size_t i, uint8_t v) {
+#if defined(OPENSSL_BIG_ENDIAN)
+  state[i / 8] ^= uint64_t{v} << (8 * (i % 8));
+#else
+  reinterpret_cast<uint8_t *>(state)[i] ^= v;
+#endif
+}
+
+// Copies `len` bytes of `state`, in little-endian order, from `offset`.
+static void keccak_copy_bytes(uint8_t *out, const uint64_t *state,
+                              size_t offset, size_t len) {
+#if defined(OPENSSL_BIG_ENDIAN)
+  for (size_t i = 0; i < len; i++) {
+    out[i] = static_cast<uint8_t>(state[(offset + i) / 8] >>
+                                  (8 * ((offset + i) % 8)));
+  }
+#else
+  OPENSSL_memcpy(out, reinterpret_cast<const uint8_t *>(state) + offset, len);
+#endif
+}
+
 void bssl::BORINGSSL_keccak_absorb(struct BORINGSSL_keccak_st *ctx,
                                    const uint8_t *in, size_t in_len) {
   // It's illegal to call absorb() again after calling squeeze().
   BSSL_CHECK(ctx->phase != boringssl_keccak_phase_squeeze);
 
   const size_t rate_words = ctx->rate_bytes / 8;
-  // XOR the input. Accessing `ctx->state` as a `uint8_t*` is allowed by
-  // strict aliasing because we require `uint8_t` to be a character type.
-  uint8_t *state_bytes = (uint8_t *)ctx->state;
 
   // Absorb partial block.
   if (ctx->absorb_offset != 0) {
     assert(ctx->absorb_offset < ctx->rate_bytes);
     size_t first_block_len = ctx->rate_bytes - ctx->absorb_offset;
     for (size_t i = 0; i < first_block_len && i < in_len; i++) {
-      state_bytes[ctx->absorb_offset + i] ^= in[i];
+      keccak_xor_byte(ctx->state, ctx->absorb_offset + i, in[i]);
     }
 
     // This input didn't fill the block.
@@ -328,7 +347,7 @@ void bssl::BORINGSSL_keccak_absorb(struct BORINGSSL_keccak_st *ctx,
   // Absorb partial block.
   assert(in_len < ctx->rate_bytes);
   for (size_t i = 0; i < in_len; i++) {
-    state_bytes[i] ^= in[i];
+    keccak_xor_byte(ctx->state, i, in[i]);
   }
   ctx->absorb_offset = in_len;
 }
@@ -347,22 +366,17 @@ static uint8_t keccak_terminator(struct BORINGSSL_keccak_st *ctx) {
 }
 
 static void keccak_finalize(struct BORINGSSL_keccak_st *ctx) {
-  // XOR the terminator. Accessing `ctx->state` as a `uint8_t*` is allowed by
-  // strict aliasing because we require `uint8_t` to be a character type.
-  uint8_t *state_bytes = (uint8_t *)ctx->state;
-  state_bytes[ctx->absorb_offset] ^= keccak_terminator(ctx);
-  state_bytes[ctx->rate_bytes - 1] ^= 0x80;
+  keccak_xor_byte(ctx->state, ctx->absorb_offset, keccak_terminator(ctx));
+  keccak_xor_byte(ctx->state, ctx->rate_bytes - 1, 0x80);
   keccak_f(ctx->state);
 }
 
 #if defined(HAVE_KECCAK_X2)
 static void keccak_finalize_x2(struct BORINGSSL_keccak_st ctx[2]) {
   for (size_t i = 0; i < 2; ++i) {
-    // XOR the terminator. Accessing `ctx->state` as a `uint8_t*` is allowed
-    // by strict aliasing because we require `uint8_t` to be a character type.
-    uint8_t *state_bytes = (uint8_t *)ctx[i].state;
-    state_bytes[ctx[i].absorb_offset] ^= keccak_terminator(&ctx[i]);
-    state_bytes[ctx[i].rate_bytes - 1] ^= 0x80;
+    keccak_xor_byte(ctx[i].state, ctx[i].absorb_offset,
+                    keccak_terminator(&ctx[i]));
+    keccak_xor_byte(ctx[i].state, ctx[i].rate_bytes - 1, 0x80);
   }
   keccak_f_x2(ctx[0].state, ctx[1].state);
 }
@@ -371,8 +385,6 @@ static void keccak_finalize_x2(struct BORINGSSL_keccak_st ctx[2]) {
 #if defined(HAVE_KECCAK_X4)
 static void keccak_finalize_x4(struct BORINGSSL_keccak_st ctx[4]) {
   for (size_t i = 0; i < 4; ++i) {
-    // XOR the terminator. Accessing `ctx->state` as a `uint8_t*` is allowed
-    // by strict aliasing because we require `uint8_t` to be a character type.
     uint8_t terminator;
     switch (ctx[i].config) {
       case boringssl_sha3_256:
@@ -386,9 +398,8 @@ static void keccak_finalize_x4(struct BORINGSSL_keccak_st ctx[4]) {
       default:
         abort();
     }
-    uint8_t *state_bytes = (uint8_t *)ctx[i].state;
-    state_bytes[ctx[i].absorb_offset] ^= terminator;
-    state_bytes[ctx[i].rate_bytes - 1] ^= 0x80;
+    keccak_xor_byte(ctx[i].state, ctx[i].absorb_offset, terminator);
+    keccak_xor_byte(ctx[i].state, ctx[i].rate_bytes - 1, 0x80);
   }
   keccak_f_x4(ctx[0].state, ctx[1].state, ctx[2].state, ctx[3].state);
 }
@@ -407,9 +418,6 @@ void bssl::BORINGSSL_keccak_squeeze(struct BORINGSSL_keccak_st *ctx,
     ctx->phase = boringssl_keccak_phase_squeeze;
   }
 
-  // Accessing `ctx->state` as a `uint8_t*` is allowed by strict aliasing
-  // because we require `uint8_t` to be a character type.
-  const uint8_t *state_bytes = (const uint8_t *)ctx->state;
   while (out_len) {
     if (ctx->squeeze_offset == ctx->rate_bytes) {
       keccak_f(ctx->state);
@@ -421,7 +429,7 @@ void bssl::BORINGSSL_keccak_squeeze(struct BORINGSSL_keccak_st *ctx,
     if (todo > remaining) {
       todo = remaining;
     }
-    OPENSSL_memcpy(out, &state_bytes[ctx->squeeze_offset], todo);
+    keccak_copy_bytes(out, ctx->state, ctx->squeeze_offset, todo);
     out += todo;
     out_len -= todo;
     ctx->squeeze_offset += todo;
@@ -457,8 +465,6 @@ void bssl::BORINGSSL_keccak_squeeze_x2(struct BORINGSSL_keccak_st ctx[2],
     ctx->phase = boringssl_keccak_phase_squeeze;
   }
 
-  // Accessing `ctx->state` as a `uint8_t*` is allowed by strict aliasing
-  // because we require `uint8_t` to be a character type.
   uint8_t *optr[2] = {outs[0], outs[1]};
   while (out_len) {
     if (ctx->squeeze_offset == ctx->rate_bytes) {
@@ -472,8 +478,7 @@ void bssl::BORINGSSL_keccak_squeeze_x2(struct BORINGSSL_keccak_st ctx[2],
       todo = remaining;
     }
     for (size_t i = 0; i < 2; ++i) {
-      const uint8_t *state_bytes = (const uint8_t *)ctx[i].state;
-      OPENSSL_memcpy(optr[i], &state_bytes[ctx->squeeze_offset], todo);
+      keccak_copy_bytes(optr[i], ctx[i].state, ctx->squeeze_offset, todo);
       optr[i] += todo;
     }
     out_len -= todo;
@@ -520,8 +525,6 @@ KECCAK_X4_TARGET void bssl::BORINGSSL_keccak_squeeze_x4(
     ctx->phase = boringssl_keccak_phase_squeeze;
   }
 
-  // Accessing `ctx->state` as a `uint8_t*` is allowed by strict aliasing
-  // because we require `uint8_t` to be a character type.
   uint8_t *optr[4] = {outs[0], outs[1], outs[2], outs[3]};
   while (out_len) {
     if (ctx->squeeze_offset == ctx->rate_bytes) {
@@ -535,8 +538,7 @@ KECCAK_X4_TARGET void bssl::BORINGSSL_keccak_squeeze_x4(
       todo = remaining;
     }
     for (size_t i = 0; i < 4; ++i) {
-      const uint8_t *state_bytes = (const uint8_t *)ctx[i].state;
-      OPENSSL_memcpy(optr[i], &state_bytes[ctx->squeeze_offset], todo);
+      keccak_copy_bytes(optr[i], ctx[i].state, ctx->squeeze_offset, todo);
       optr[i] += todo;
     }
     out_len -= todo;

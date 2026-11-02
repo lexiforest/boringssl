@@ -22,6 +22,13 @@
 
 using namespace bssl;
 
+#if defined(OPENSSL_BIG_ENDIAN)
+// Returns byte `i` of `words` in little-endian order.
+static uint8_t bn_word_byte(const BN_ULONG *words, size_t i) {
+  return static_cast<uint8_t>(words[i / BN_BYTES] >> (8 * (i % BN_BYTES)));
+}
+#endif
+
 void bssl::bn_big_endian_to_words(BN_ULONG *out, size_t out_len,
                                   const uint8_t *in, size_t in_len) {
   // The caller should have sized `out` to fit `in` without truncating. This
@@ -108,12 +115,19 @@ BIGNUM *BN_lebin2bn(const uint8_t *in, size_t len, BIGNUM *ret) {
   ret->width = (int)num_words;
   ret->neg = 0;
 
+#if defined(OPENSSL_BIG_ENDIAN)
+  OPENSSL_memset(ret->d, 0, num_words * sizeof(BN_ULONG));
+  for (size_t i = 0; i < len; i++) {
+    ret->d[i / BN_BYTES] |= BN_ULONG{in[i]} << (8 * (i % BN_BYTES));
+  }
+#else
   // Make sure the top bytes will be zeroed.
   ret->d[num_words - 1] = 0;
 
-  // We only support little-endian platforms, so we can simply memcpy the
-  // internal representation.
+  // On little-endian platforms, we can simply memcpy the internal
+  // representation.
   OPENSSL_memcpy(ret->d, in, len);
+#endif
   return ret;
 }
 
@@ -125,11 +139,14 @@ BIGNUM *BN_le2bn(const uint8_t *in, size_t len, BIGNUM *ret) {
 // represented in `num_bytes` bytes.
 static int fits_in_bytes(const BN_ULONG *words, size_t num_words,
                          size_t num_bytes) {
-  const uint8_t *bytes = (const uint8_t *)words;
   size_t tot_bytes = num_words * sizeof(BN_ULONG);
   uint8_t mask = 0;
   for (size_t i = num_bytes; i < tot_bytes; i++) {
-    mask |= bytes[i];
+#if defined(OPENSSL_BIG_ENDIAN)
+    mask |= bn_word_byte(words, i);
+#else
+    mask |= reinterpret_cast<const uint8_t *>(words)[i];
+#endif
   }
   return mask == 0;
 }
@@ -140,7 +157,11 @@ void bssl::bn_assert_fits_in_bytes(const BIGNUM *bn, size_t num) {
   if (tot_bytes > num) {
     CONSTTIME_DECLASSIFY(bytes + num, tot_bytes - num);
     for (size_t i = num; i < tot_bytes; i++) {
+#if defined(OPENSSL_BIG_ENDIAN)
+      assert(bn_word_byte(bn->d, i) == 0);
+#else
       assert(bytes[i] == 0);
+#endif
     }
     (void)bytes;
   }
@@ -151,16 +172,19 @@ void bssl::bn_words_to_big_endian(uint8_t *out, size_t out_len,
   // The caller should have selected an output length without truncation.
   declassify_assert(fits_in_bytes(in, in_len, out_len));
 
-  // We only support little-endian platforms, so the internal representation is
-  // also little-endian as bytes. We can simply copy it in reverse.
-  const uint8_t *bytes = (const uint8_t *)in;
   size_t num_bytes = in_len * sizeof(BN_ULONG);
   if (out_len < num_bytes) {
     num_bytes = out_len;
   }
 
   for (size_t i = 0; i < num_bytes; i++) {
-    out[out_len - i - 1] = bytes[i];
+#if defined(OPENSSL_BIG_ENDIAN)
+    out[out_len - i - 1] = bn_word_byte(in, i);
+#else
+    // On little-endian platforms, the internal representation is also
+    // little-endian as bytes, so we can simply copy it in reverse.
+    out[out_len - i - 1] = reinterpret_cast<const uint8_t *>(in)[i];
+#endif
   }
   // Pad out the rest of the buffer with zeroes.
   OPENSSL_memset(out, 0, out_len - num_bytes);
@@ -177,15 +201,20 @@ int BN_bn2le_padded(uint8_t *out, size_t len, const BIGNUM *in) {
     return 0;
   }
 
-  // We only support little-endian platforms, so we can simply memcpy into the
-  // internal representation.
-  const uint8_t *bytes = (const uint8_t *)in->d;
   size_t num_bytes = in->width * BN_BYTES;
   if (len < num_bytes) {
     num_bytes = len;
   }
 
-  OPENSSL_memcpy(out, bytes, num_bytes);
+#if defined(OPENSSL_BIG_ENDIAN)
+  for (size_t i = 0; i < num_bytes; i++) {
+    out[i] = bn_word_byte(in->d, i);
+  }
+#else
+  // On little-endian platforms, we can simply memcpy the internal
+  // representation.
+  OPENSSL_memcpy(out, in->d, num_bytes);
+#endif
   // Pad out the rest of the buffer with zeroes.
   OPENSSL_memset(out + num_bytes, 0, len - num_bytes);
   return 1;

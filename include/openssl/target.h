@@ -59,6 +59,9 @@
 #define OPENSSL_32_BIT
 #elif defined(__myriad2__)
 #define OPENSSL_32_BIT
+#elif defined(__s390x__)
+#define OPENSSL_64_BIT
+#define OPENSSL_S390X
 #else
 // The list above enumerates the platforms that BoringSSL supports. For these
 // platforms we keep a reasonable bar of not breaking them: automated test
@@ -77,6 +80,10 @@
 // the correct answer on other systems. Run the crypto_test binary, notably
 // crypto/compiler_test.cc, before trying a new architecture.
 #error "Unknown target CPU"
+#endif
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define OPENSSL_BIG_ENDIAN
 #endif
 
 #if defined(__APPLE__)

@@ -161,7 +161,9 @@ void BLAKE2B256_Final(uint8_t out[BLAKE2B256_DIGEST_LENGTH], BLAKE2B_CTX *b2b) {
   blake2b_transform(b2b, b2b->block, b2b->block_used,
                     /*is_final_block=*/1);
   static_assert(BLAKE2B256_DIGEST_LENGTH <= sizeof(b2b->h));
-  memcpy(out, b2b->h, BLAKE2B256_DIGEST_LENGTH);
+  for (size_t i = 0; i < BLAKE2B256_DIGEST_LENGTH / 8; i++) {
+    CRYPTO_store_u64_le(out + 8 * i, b2b->h[i]);
+  }
 }
 
 void BLAKE2B256(const uint8_t *data, size_t len,

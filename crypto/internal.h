@@ -903,85 +903,132 @@ inline void *OPENSSL_memset(void *dst, int c, size_t n) {
 inline uint16_t CRYPTO_load_u16_le(const void *in) {
   uint16_t v;
   OPENSSL_memcpy(&v, in, sizeof(v));
+#if defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap2(v);
+#endif
   return v;
 }
 
 inline void CRYPTO_store_u16_le(void *out, uint16_t v) {
+#if defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap2(v);
+#endif
   OPENSSL_memcpy(out, &v, sizeof(v));
 }
 
 inline uint16_t CRYPTO_load_u16_be(const void *in) {
   uint16_t v;
   OPENSSL_memcpy(&v, in, sizeof(v));
-  return CRYPTO_bswap2(v);
+#if !defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap2(v);
+#endif
+  return v;
 }
 
 inline void CRYPTO_store_u16_be(void *out, uint16_t v) {
+#if !defined(OPENSSL_BIG_ENDIAN)
   v = CRYPTO_bswap2(v);
+#endif
   OPENSSL_memcpy(out, &v, sizeof(v));
 }
 
 inline uint32_t CRYPTO_load_u32_le(const void *in) {
   uint32_t v;
   OPENSSL_memcpy(&v, in, sizeof(v));
+#if defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap4(v);
+#endif
   return v;
 }
 
 inline void CRYPTO_store_u32_le(void *out, uint32_t v) {
+#if defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap4(v);
+#endif
   OPENSSL_memcpy(out, &v, sizeof(v));
 }
 
 inline uint32_t CRYPTO_load_u32_be(const void *in) {
   uint32_t v;
   OPENSSL_memcpy(&v, in, sizeof(v));
-  return CRYPTO_bswap4(v);
+#if !defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap4(v);
+#endif
+  return v;
 }
 
 inline void CRYPTO_store_u32_be(void *out, uint32_t v) {
+#if !defined(OPENSSL_BIG_ENDIAN)
   v = CRYPTO_bswap4(v);
+#endif
   OPENSSL_memcpy(out, &v, sizeof(v));
 }
 
 inline uint64_t CRYPTO_load_u64_le(const void *in) {
   uint64_t v;
   OPENSSL_memcpy(&v, in, sizeof(v));
+#if defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap8(v);
+#endif
   return v;
 }
 
 inline void CRYPTO_store_u64_le(void *out, uint64_t v) {
+#if defined(OPENSSL_BIG_ENDIAN)
+  v = CRYPTO_bswap8(v);
+#endif
   OPENSSL_memcpy(out, &v, sizeof(v));
 }
 
 inline uint64_t CRYPTO_load_u64_be(const void *ptr) {
   uint64_t ret;
   OPENSSL_memcpy(&ret, ptr, sizeof(ret));
-  return CRYPTO_bswap8(ret);
+#if !defined(OPENSSL_BIG_ENDIAN)
+  ret = CRYPTO_bswap8(ret);
+#endif
+  return ret;
 }
 
 inline void CRYPTO_store_u64_be(void *out, uint64_t v) {
+#if !defined(OPENSSL_BIG_ENDIAN)
   v = CRYPTO_bswap8(v);
+#endif
   OPENSSL_memcpy(out, &v, sizeof(v));
 }
 
 inline crypto_word_t CRYPTO_load_word_le(const void *in) {
-  crypto_word_t v;
-  OPENSSL_memcpy(&v, in, sizeof(v));
-  return v;
+#if defined(OPENSSL_64_BIT)
+  static_assert(sizeof(crypto_word_t) == 8, "crypto_word_t has unexpected size");
+  return CRYPTO_load_u64_le(in);
+#else
+  static_assert(sizeof(crypto_word_t) == 4, "crypto_word_t has unexpected size");
+  return CRYPTO_load_u32_le(in);
+#endif
 }
 
 inline void CRYPTO_store_word_le(void *out, crypto_word_t v) {
-  OPENSSL_memcpy(out, &v, sizeof(v));
+#if defined(OPENSSL_64_BIT)
+  CRYPTO_store_u64_le(out, v);
+#else
+  CRYPTO_store_u32_le(out, v);
+#endif
 }
 
 inline crypto_word_t CRYPTO_load_word_be(const void *in) {
-  crypto_word_t v;
-  OPENSSL_memcpy(&v, in, sizeof(v));
 #if defined(OPENSSL_64_BIT)
-  static_assert(sizeof(v) == 8, "crypto_word_t has unexpected size");
-  return CRYPTO_bswap8(v);
+  static_assert(sizeof(crypto_word_t) == 8, "crypto_word_t has unexpected size");
+  return CRYPTO_load_u64_be(in);
 #else
-  static_assert(sizeof(v) == 4, "crypto_word_t has unexpected size");
-  return CRYPTO_bswap4(v);
+  static_assert(sizeof(crypto_word_t) == 4, "crypto_word_t has unexpected size");
+  return CRYPTO_load_u32_be(in);
+#endif
+}
+
+inline void CRYPTO_store_word_be(void *out, crypto_word_t v) {
+#if defined(OPENSSL_64_BIT)
+  CRYPTO_store_u64_be(out, v);
+#else
+  CRYPTO_store_u32_be(out, v);
 #endif
 }
 

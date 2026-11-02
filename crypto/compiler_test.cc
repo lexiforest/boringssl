@@ -69,10 +69,14 @@ static void CheckRepresentation(T value) {
   UnsignedT value_u = static_cast<UnsignedT>(value);
   EXPECT_EQ(sizeof(UnsignedT), sizeof(T));
 
-  // Integers must be little-endian.
+  // Integers must be little-endian, or big-endian on big-endian targets.
   uint8_t expected[sizeof(UnsignedT)];
   for (size_t i = 0; i < sizeof(UnsignedT); i++) {
+#if defined(OPENSSL_BIG_ENDIAN)
+    expected[sizeof(UnsignedT) - 1 - i] = static_cast<uint8_t>(value_u);
+#else
     expected[i] = static_cast<uint8_t>(value_u);
+#endif
     // Divide instead of right-shift to appease compilers that warn if `T` is a
     // char. The explicit cast is also needed to appease MSVC if integer
     // promotion happened.
